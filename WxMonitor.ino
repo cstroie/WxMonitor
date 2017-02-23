@@ -1,7 +1,26 @@
 /**
-   Weather Monitor
+   WxMon - Weather Monitor
 
+  Copyright 2017 Costin STROIE <costinstroie@eridu.eu.org>
+
+  This file is part of Weather Station.
+
+  WxMon is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by the Free
+  Software Foundation, either version 3 of the License, or (at your option) any
+  later version.
+
+  WxMon is distributed in the hope that it will be useful, but
+  WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+  more details.
+
+  You should have received a copy of the GNU General Public License along with
+  WxMon.  If not, see <http://www.gnu.org/licenses/>.
 */
+
+// The DEBUG flag
+//#define DEBUG
 
 // LCD: use the HD447890 library and Wire i2c library
 #include <Wire.h>
@@ -30,8 +49,13 @@
 
 
 // Device name
+#if defined(DEBUG)
+String NODENAME = "DevNode";
+String LC_NODENAME = "devnode";
+#else
 String NODENAME = "WxMon";
 String LC_NODENAME = "wxmon";  // FIXME DNRY
+#endif
 
 // LCD
 #define WIRECLOCK     400000L   // tell hd44780 to use 400kHz i2c clock rate
@@ -40,7 +64,7 @@ hd44780_I2Cexp        lcd;      // auto locate and autoconfig interface pins
 const int PIR_PIN = D5;
 const int LCD_INTERVAL = 4 * 1000;
 const int PIR_INTERVAL = 300 * 1000;
-enum LCD_SCREENS {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_BAR, SCR_SUN, SCR_MON};
+enum LCD_SCREENS {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON};
 enum LCD_CHARS {LCD_LOGO, LCD_NUM, LCD_MOON};
 
 AsyncDelay delayLCD;
@@ -85,8 +109,17 @@ String strReports = "now tod ton tom dat sun mon bar ";
 String wxReport[8][2];
 String strLnSep = ", ";
 
+// Sensors
+String strSensors = "itp ihm otp ohm odp ops ";
+int snsReport[6][2];
+const int SNS_INTERVAL = 600 * 1000;
+
 // MQTT parameters
+#if defined(DEBUG)
+const char MQTT_ID[] = "devnode-eridu-eu-org";
+#else
 const char MQTT_ID[] = "wxmon-eridu-eu-org";
+#endif
 const char MQTT_SERVER[] = "eridu.eu.org";
 const int  MQTT_PORT = 1883;
 const int  MQTT_INTERVAL = 5000;
@@ -182,11 +215,15 @@ void lcdDefChars(int lcdCharsType) {
 
 /**
   Copy the source array to destination array and return the length
+
+  @param dst the destination array
+  @param src the source array
+  @param len the length of the source array
+  @return the number of columns (half the length of the source array)
 */
-byte copyArray(byte dst[], byte src[]) {
-  byte len = sizeof(src);
+byte copyArray(byte dst[], byte src[], byte len) {
   memcpy(dst, src, len);
-  return len;
+  return len >> 1;
 }
 
 /**
@@ -194,114 +231,98 @@ byte copyArray(byte dst[], byte src[]) {
 
   @param chr the character to define
   @param charShapes array of needed character shapes
+  @return the number of display columns the character uses
 */
 byte lcdBigConstruct(char chr, byte charShapes[]) {
   byte charCols = 0;
   switch (chr) {
-    case '0':
-      {
+    case '0': {
         byte tmpShapes[] = {255, 3, 255, 255, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '1':
-      {
+    case '1': {
         byte tmpShapes[] = {0, 255, 32, 1, 255, 1};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '2':
-      {
+    case '2': {
         byte tmpShapes[] = {0, 2, 255, 255, 4, 1};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '3':
-      {
+    case '3': {
         byte tmpShapes[] = {0, 2, 255, 1, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '4':
-      {
+    case '4': {
         byte tmpShapes[] = {255, 4, 255, 32, 32, 255};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '5':
-      {
+    case '5': {
         byte tmpShapes[] = {255, 2, 0, 1, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '6':
-      {
+    case '6': {
         byte tmpShapes[] = {255, 2, 0, 255, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '7':
-      {
+    case '7': {
         byte tmpShapes[] = {0, 3, 255, 32, 32, 255};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '8':
-      {
+    case '8': {
         byte tmpShapes[] = {255, 2, 255, 255, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '9':
-      {
+    case '9': {
         byte tmpShapes[] = {255, 2, 255, 1, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case 'C':
-      {
+    case 'C': {
         byte tmpShapes[] = {255, 3, 0, 255, 4, 1};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '-':
-      {
+    case '-': {
         byte tmpShapes[] = {32, 1, 1, 32, 32, 32};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case ' ':
-      {
+    case ' ': {
         byte tmpShapes[] = {32, 32, 32, 32, 32, 32};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case ':':
-      {
+    case ':': {
         byte tmpShapes[] = {5, 6, 5, 6};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '.':
-      {
+    case '.': {
         byte tmpShapes[] = {32, 32, 5, 6};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '\'':
-      {
+    case '\'': {
         byte tmpShapes[] = {5, 6, 32, 32};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case '%':
-      {
+    case '%': {
         byte tmpShapes[] = {5, 6, 1, 0, 1, 0, 5, 6};
-        charCols = copyArray(charShapes, tmpShapes);
+        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
   }
-  return charCols >> 1;
+  return charCols;
 }
 
 /**
@@ -347,7 +368,10 @@ bool lcdShowTime() {
   char text[6] = "";
   sprintf(text, "%02d:%02d", hours, minutes);
   byte cols[] = {0, 4, 7, 9, 13};
-  //Serial.println(text);
+#if defined(DEBUG)
+  Serial.print("SCR_CLK ");
+  Serial.println(text);
+#endif
   lcd.clear();
   lcdBigPrint(text, cols, LCD_NUM);
   return true;
@@ -361,7 +385,10 @@ bool lcdShowTemp() {
     char text[6] = "";
     sprintf(text, "% d'C", (int)dhtTemp);
     byte cols[] = {0, 4, 8, 11, 13};
-    //Serial.println(text);
+#if defined(DEBUG)
+    Serial.print("SCR_TEMP ");
+    Serial.println(text);
+#endif
     lcd.clear();
     lcdBigPrint(text, cols, LCD_NUM);
   }
@@ -376,7 +403,10 @@ bool lcdShowHmdt() {
     char text[6] = "";
     sprintf(text, "% d%%", (int)dhtHmdt);
     byte cols[] = {0, 4, 8, 12};
-    //Serial.println(text);
+#if defined(DEBUG)
+    Serial.print("SCR_HMDT ");
+    Serial.println(text);
+#endif
     lcd.clear();
     lcdBigPrint(text, cols, LCD_NUM);
   }
@@ -428,7 +458,7 @@ bool lcdShowWeather(char* report) {
   int idxReport = strReports.indexOf(String(report) + " ");
   if (idxReport != -1) {
     idxReport /= 4;
-    if (wxReport[idxReport][0] != "") {
+    if        (wxReport[idxReport][0] != "") {
       if (report == "now") {
         tplUpLn = "Now% 13s";
         tplLwLn = "";
@@ -443,6 +473,10 @@ bool lcdShowWeather(char* report) {
       }
       else if (report == "tom") {
         tplUpLn = "Tmrrow % 9s";
+        tplLwLn = "";
+      }
+      else if (report == "dat") {
+        tplUpLn = "AfTmrw % 9s";
         tplLwLn = "";
       }
       else if (report == "sun") {
@@ -484,6 +518,66 @@ bool lcdShowWeather(char* report) {
 }
 
 /**
+  LCD Display the sensors
+
+  @param sensor the sensor to display
+*/
+bool lcdShowSensor(char* sensor) {
+  char text[6] = "";
+  int idxReport = strSensors.indexOf(String(sensor) + " ");
+  if (idxReport != -1) {
+    idxReport /= 4;
+    if (snsReport[idxReport][1] > 0) {
+      if      (sensor == "otp") {
+        sprintf(text, "% d'C", snsReport[idxReport][0]);
+        byte cols[] = {0, 4, 8, 11, 13};
+#if defined(DEBUG)
+        Serial.print("SCR_OTP ");
+        Serial.println(text);
+#endif
+        lcd.clear();
+        lcdBigPrint(text, cols, LCD_NUM);
+      }
+      else if (sensor == "ohm") {
+        sprintf(text, "% d%%", snsReport[idxReport][0]);
+        byte cols[] = {0, 4, 8, 12};
+#if defined(DEBUG)
+        Serial.print("SCR_OHM ");
+        Serial.println(text);
+#endif
+        lcd.clear();
+        lcdBigPrint(text, cols, LCD_NUM);
+      }
+      else if (sensor == "odp") {
+        sprintf(text, "% d'C", snsReport[idxReport][0]);
+        byte cols[] = {0, 4, 8, 11, 13};
+#if defined(DEBUG)
+        Serial.print("SCR_ODP ");
+        Serial.println(text);
+#endif
+        lcd.clear();
+        lcdBigPrint(text, cols, LCD_NUM);
+      }
+      else if (sensor == "ops") {
+        sprintf(text, "% d", snsReport[idxReport][0]);
+        byte cols[] = {0, 4, 8, 12};
+#if defined(DEBUG)
+        Serial.print("SCR_OPS ");
+        Serial.println(text);
+#endif
+        lcd.clear();
+        lcdBigPrint(text, cols, LCD_NUM);
+      }
+      if (snsReport[idxReport][1] + SNS_INTERVAL < millis()) {
+        snsClear(sensor);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
   LCD Clear the display then print the two lines
 
   @param upLine text to print on upper line
@@ -503,12 +597,16 @@ void lcdScreen(char* upLine, char* lwLine) {
   If default has been displayed, return an invalid value (-1).
 
   @param index the screen index to display
-  @return recommended next index
+  @return recommended next index if the required screen has succeeded,
+          -1 if the default screen has been selected,
+          0 if the screen failed
 */
 int lcdShowScreen(int index) {
   bool result;
-  //Serial.print(F("IDX "));
-  //Serial.println(index);
+#if defined(DEBUG)
+  Serial.print(F("SCR_IDX "));
+  Serial.println(index);
+#endif
   switch (index) {
     case SCR_WIFI:
       result = lcdShowWiFi(false);
@@ -518,6 +616,18 @@ int lcdShowScreen(int index) {
       break;
     case SCR_HMDT:
       result = lcdShowHmdt();
+      break;
+    case SCR_OTP:
+      result = lcdShowSensor("otp");
+      break;
+    case SCR_OHM:
+      result = lcdShowSensor("ohm");
+      break;
+    case SCR_ODP:
+      result = lcdShowSensor("odp");
+      break;
+    case SCR_OPS:
+      result = lcdShowSensor("ops");
       break;
     case SCR_NOW:
       result = lcdShowWeather("now");
@@ -530,6 +640,9 @@ int lcdShowScreen(int index) {
       break;
     case SCR_TOM:
       result = lcdShowWeather("tom");
+      break;
+    case SCR_DAT:
+      result = lcdShowWeather("dat");
       break;
     case SCR_BAR:
       result = lcdShowWeather("bar");
@@ -569,8 +682,10 @@ void lcdRotateScreens() {
     else {
       lcdIndex = nextIndex;
     }
-    //Serial.print(F("NXT "));
-    //Serial.println(nextIndex);
+#if defined(DEBUG)
+    Serial.print(F("SCR_NXT "));
+    Serial.println(nextIndex);
+#endif
   } while (nextIndex <= 0);
 }
 
@@ -625,17 +740,26 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   int idxSepOne = strTopic.indexOf('/');
   if (idxSepOne != -1) {
     strRoot = strTopic.substring(0, idxSepOne);
-    //Serial.println("ROOT " + strRoot);
+#if defined(DEBUG)
+    Serial.println("MQTT_ROOT " + strRoot);
+#endif
     int idxSepTwo = strTopic.indexOf('/', idxSepOne + 1);
     if (idxSepTwo != -1) {
       strTrunk = strTopic.substring(idxSepOne + 1, idxSepTwo);
-      //Serial.println("TRNK " + strTrunk);
+#if defined(DEBUG)
+      Serial.println("MQTT_TRNK " + strTrunk);
+#endif
       strBranch = strTopic.substring(idxSepTwo + 1);
-      //Serial.println("BRNC " + strBranch);
+#if defined(DEBUG)
+      Serial.println("MQTT_BRNC " + strBranch);
+#endif
 
       // Dispatcher
       if (strRoot == "wx" && strTrunk == WX_STATION) {
         wxProcess(strBranch, strMessage);
+      }
+      else if (strRoot == "sensor") {
+        snsProcess(strTopic.substring(idxSepOne + 1), strMessage);
       }
       else if (strRoot == "command") {
         if (strTrunk == "rcs") {
@@ -665,7 +789,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 /**
   Process the MQTT weather topics and messages and create weather reports
 
-  @param strTopic the MQTT topic
+  @param strBranch the MQTT branch topic
   @param strMessage the MQTT message
 */
 void wxProcess(String strBranch, String strMessage) {
@@ -700,6 +824,62 @@ void wxClear(String report) {
     idxReport /= 4;
     wxReport[idxReport][0] = "";
     wxReport[idxReport][1] = "";
+  }
+}
+
+/**
+  Process the sensor topics and messages and create sensor reports
+
+  @param strSensor the sensor name
+  @param strMessage the sensor value
+*/
+void snsProcess(String strSensor, String strMessage) {
+  if      (strSensor == "outdoor/temperature") {
+    snsUpdate("otp", strMessage);
+  }
+  else if (strSensor == "outdoor/humidity") {
+    snsUpdate("ohm", strMessage);
+  }
+  else if (strSensor == "outdoor/dewpoint") {
+    snsUpdate("odp", strMessage);
+  }
+  else if (strSensor == "outdoor/pressure") {
+    snsUpdate("ops", strMessage);
+  }
+}
+/**
+  Update a sensor
+
+  @param snsName the sensor name
+  @param strMessage the sensor value
+*/
+void snsUpdate(String snsName, String strMessage) {
+  if (snsName != "") {
+    // Check the report index
+    int idxReport = strSensors.indexOf(snsName + " ");
+    if (idxReport != -1) {
+      idxReport /= 4;
+      snsReport[idxReport][0] = strMessage.toInt();
+      snsReport[idxReport][1] = millis() / 1000;
+#if defined(DEBUG)
+      Serial.println("SNS_NAM " + snsName);
+      Serial.println("SNS_VAL " + String(snsReport[idxReport][0]));
+#endif
+    }
+  }
+}
+
+/**
+  Clear a sensor
+
+  @param sensor the sensor to be clean
+*/
+void snsClear(String snsName) {
+  int idxReport = strSensors.indexOf(snsName + " ");
+  if (idxReport != -1) {
+    idxReport /= 4;
+    snsReport[idxReport][0] = 0;
+    snsReport[idxReport][1] = 0;
   }
 }
 
@@ -760,11 +940,13 @@ bool dhtRead() {
   On motion detection, turn the backlight on and display the first screen
 */
 void pirInterrupt() {
+  // Do not reset the screens on subsequent movements
   if (delayPIR.isExpired()) {
     lcd.backlight();
     lcdIndex = 0;
     lcdRotateScreens();
   }
+  // Re-start the timer to disable the backlight
   delayPIR.start(PIR_INTERVAL, AsyncDelay::MILLIS);
   //Serial.println("Motion detected");
 }
@@ -800,6 +982,10 @@ void setup() {
   wifiManager.setAPCallback(wifiCallback);
   wifiManager.autoConnect(NODENAME.c_str());
   while (!wifiManager.autoConnect(NODENAME.c_str())) {
+    String strMsg = "No WiFi network ";
+    Serial.println(strMsg);
+    lcd.setCursor(0, 1);
+    lcd.print(strMsg.c_str());
     delay(1000);
   }
 
