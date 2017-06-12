@@ -1,5 +1,5 @@
 /**
-   WxMon - Weather Monitor
+  WxMon - Weather Monitor
 
   Copyright 2017 Costin STROIE <costinstroie@eridu.eu.org>
 
@@ -23,6 +23,8 @@
 //#define DEBUG
 
 // LCD: use the HD447890 library and Wire i2c library
+#define SDA 0
+#define SCL 2
 #include <Wire.h>
 #include <hd44780.h>
 #include <hd44780ioClass/hd44780_I2Cexp.h> // include i/o class header
@@ -33,6 +35,8 @@
 #include <WiFiUdp.h>
 
 // NTP
+//#include <NtpClientLib.h>
+#include <TimeLib.h>
 #include <NTPClient.h>
 
 // Timer
@@ -49,12 +53,14 @@
 
 
 // Device name
-#if defined(DEBUG)
+#ifdef DEBUG
 String NODENAME = "DevNode";
 String LC_NODENAME = "devnode";
+String VERSION = "0.4";
 #else
 String NODENAME = "WxMon";
-String LC_NODENAME = "wxmon";  // FIXME DNRY
+String LC_NODENAME = "wxmon";
+String VERSION = "3.0";
 #endif
 
 // LCD
@@ -100,6 +106,7 @@ const uint8_t LCD_BGNUM_SHAPES[8 * 8] PROGMEM = {
 const int  TZ = 2;
 const char NTP_SERVER[] = "europe.pool.ntp.org";
 const int  NTP_INTERVAL = 765 * 1000;
+
 WiFiUDP ntpUDP;
 NTPClient NTP_Client(ntpUDP, NTP_SERVER, 3600 * TZ, NTP_INTERVAL);
 
@@ -115,7 +122,7 @@ int snsReport[6][2];
 const int SNS_INTERVAL = 600 * 1000;
 
 // MQTT parameters
-#if defined(DEBUG)
+#ifdef DEBUG
 const char MQTT_ID[] = "devnode-eridu-eu-org";
 #else
 const char MQTT_ID[] = "wxmon-eridu-eu-org";
@@ -123,12 +130,12 @@ const char MQTT_ID[] = "wxmon-eridu-eu-org";
 const char MQTT_SERVER[] = "eridu.eu.org";
 const int  MQTT_PORT = 1883;
 const int  MQTT_INTERVAL = 5000;
-String MQTT_WX   = String("wx/" + WX_STATION + "/");
-String MQTT_CMD  = "command/" + LC_NODENAME + "/";
-String MQTT_RCS  = "command/rcs/";
-String MQTT_REPORT = "report/" + LC_NODENAME;
+String MQTT_WX      = "wx/" + WX_STATION + "/";
+String MQTT_CMD     = "command/" + LC_NODENAME + "/";
+String MQTT_RCS     = "command/rcs/";
+String MQTT_REPORT  = "report/" + LC_NODENAME;
 String MQTT_REPORT_WIFI = MQTT_REPORT + "/wifi";
-String MQTT_SENSOR = "sensor/indoor"; // + LC_NODENAME;
+String MQTT_SENSOR  = "sensor/indoor"; // + LC_NODENAME;
 WiFiClient WiFi_Client;
 PubSubClient MQTT_Client(WiFi_Client);
 AsyncDelay delayMQTT;
@@ -165,7 +172,7 @@ const String strLcdDeg = chrLcdDeg;
   LCD initialization
 */
 void lcdInit() {
-  lcd.begin(16, 2);
+  lcd.begin(20, 4);
   lcd.setBacklight(HIGH);
   lcdLogo();
 }
@@ -178,7 +185,7 @@ void lcdLogo() {
   lcdDefChars(LCD_LOGO);
   //Serial.println(text);
   lcd.clear();
-  lcd.setCursor(3, 0);
+  lcd.setCursor(5, 1);
   for (byte item = 0; item < sizeof(text); item++) {
     lcd.write(text[item]);
   }
@@ -367,7 +374,7 @@ bool lcdShowTime() {
   unsigned long minutes = (rawTime % 3600) / 60;
   char text[6] = "";
   sprintf(text, "%02d:%02d", hours, minutes);
-  byte cols[] = {0, 4, 7, 9, 13};
+  byte cols[] = {2, 6, 9, 11, 15};
 #if defined(DEBUG)
   Serial.print("SCR_CLK ");
   Serial.println(text);
@@ -384,7 +391,7 @@ bool lcdShowTemp() {
   if (dhtValid) {
     char text[6] = "";
     sprintf(text, "% d'C", (int)dhtTemp);
-    byte cols[] = {0, 4, 8, 11, 13};
+    byte cols[] = {4, 8, 2, 15, 17};
 #if defined(DEBUG)
     Serial.print("SCR_TEMP ");
     Serial.println(text);
@@ -402,7 +409,7 @@ bool lcdShowHmdt() {
   if (dhtValid) {
     char text[6] = "";
     sprintf(text, "% d%%", (int)dhtHmdt);
-    byte cols[] = {0, 4, 8, 12};
+    byte cols[] = {4, 8, 12, 16};
 #if defined(DEBUG)
     Serial.print("SCR_HMDT ");
     Serial.println(text);
@@ -438,14 +445,16 @@ bool lcdShowWiFi(bool serial) {
       Serial.print(text);
     }
     lcd.setCursor(0, 0);
-    lcd.printf("WiFi % 11s", WiFi.SSID().c_str());
+    lcd.printf("WiFi % 15s", WiFi.SSID().c_str());
     lcd.setCursor(0, 1);
-    lcd.printf("% 16s", WiFi.localIP().toString().c_str());
+    lcd.printf("  IP% 16s", WiFi.localIP().toString().c_str());
+    lcd.setCursor(0, 2);
+    lcd.printf("  GW% 16s", WiFi.gatewayIP().toString().c_str());
+    lcd.setCursor(0, 3);
+    lcd.printf(" DNS% 16s", WiFi.dnsIP().toString().c_str());
     return true;
   }
-  else {
-    return false;
-  }
+  else return false;
 }
 
 /**
@@ -457,38 +466,38 @@ bool lcdShowWeather(char* report) {
   String tplUpLn, tplLwLn;
   int idxReport = strReports.indexOf(String(report) + " ");
   if (idxReport != -1) {
-    idxReport /= 4;
-    if        (wxReport[idxReport][0] != "") {
+    idxReport >> 2;
+    if (wxReport[idxReport][0] != "") {
       if (report == "now") {
-        tplUpLn = "Now% 13s";
+        tplUpLn = "Now% 17s";
         tplLwLn = "";
       }
       else if (report == "tod") {
-        tplUpLn = "Today  % 9s";
+        tplUpLn = "Today  % 13s";
         tplLwLn = "";
       }
       else if (report == "ton") {
-        tplUpLn = "Tonight% 9s";
+        tplUpLn = "Tonight% 13s";
         tplLwLn = "";
       }
       else if (report == "tom") {
-        tplUpLn = "Tmrrow % 9s";
+        tplUpLn = "Tmrrow % 13s";
         tplLwLn = "";
       }
       else if (report == "dat") {
-        tplUpLn = "AfTmrw % 9s";
+        tplUpLn = "AfTmrw % 13s";
         tplLwLn = "";
       }
       else if (report == "sun") {
-        tplUpLn = "Sunrise % 8s";
-        tplLwLn = "Sunset  % 8s";
+        tplUpLn = "Sunrise % 12s";
+        tplLwLn = "Sunset  % 12s";
       }
       else if (report == "mon") {
-        tplUpLn = "Moon % 11s";
+        tplUpLn = "Moon % 15s";
         tplLwLn = "";
       }
       else if (report == "bar") {
-        tplUpLn = "Baro% 12s";
+        tplUpLn = "Baro% 16s";
         tplLwLn = "";
       }
       // Clear the screen
@@ -689,6 +698,28 @@ void lcdRotateScreens() {
   } while (nextIndex <= 0);
 }
 
+/** MQTT publishing wrapper, using strings, with retain flag on
+
+  @param topic the MQTT topic
+  @param payload the MQTT message to send to topic
+  @return the publishig status
+*/
+boolean mqttPubRetain(const String &topic, const String &payload) {
+  yield();
+  return MQTT_Client.publish(topic.c_str(), payload.c_str(), true);
+}
+
+/** MQTT publishing wrapper, using strings
+
+  @param topic the MQTT topic
+  @param payload the MQTT message to send to topic
+  @return the publishig status
+*/
+boolean mqttPub(const String &topic, const String &payload) {
+  yield();
+  return MQTT_Client.publish(topic.c_str(), payload.c_str(), false);
+}
+
 /**
   Try to reconnect to MQTT server
 
@@ -698,12 +729,13 @@ boolean mqttReconnect() {
   Serial.println(F("MQTT connecting..."));
   if (MQTT_Client.connect(MQTT_ID)) {
     // Publish the connection report
-    MQTT_Client.publish(String(MQTT_REPORT_WIFI + "/hostname").c_str(), WiFi.hostname().c_str(), true);
-    MQTT_Client.publish(String(MQTT_REPORT_WIFI + "/mac").c_str(), WiFi.macAddress().c_str(), true);
-    MQTT_Client.publish(String(MQTT_REPORT_WIFI + "/ssid").c_str(), WiFi.SSID().c_str(), true);
-    MQTT_Client.publish(String(MQTT_REPORT_WIFI + "/rssi").c_str(), String(WiFi.RSSI()).c_str(), true);
-    MQTT_Client.publish(String(MQTT_REPORT_WIFI + "/ip").c_str(), WiFi.localIP().toString().c_str(), true);
-    MQTT_Client.publish(String(MQTT_REPORT_WIFI + "/gw").c_str(), WiFi.gatewayIP().toString().c_str(), true);
+    mqttPubRetain(MQTT_REPORT_WIFI + "/hostname", WiFi.hostname());
+    mqttPubRetain(MQTT_REPORT_WIFI + "/hostname", WiFi.hostname());
+    mqttPubRetain(MQTT_REPORT_WIFI + "/mac",      WiFi.macAddress());
+    mqttPubRetain(MQTT_REPORT_WIFI + "/ssid",     WiFi.SSID());
+    mqttPubRetain(MQTT_REPORT_WIFI + "/rssi",     String(WiFi.RSSI()));
+    mqttPubRetain(MQTT_REPORT_WIFI + "/ip",       WiFi.localIP().toString());
+    mqttPubRetain(MQTT_REPORT_WIFI + "/gw",       WiFi.gatewayIP().toString());
     // Subscribe
     MQTT_Client.subscribe(String(MQTT_CMD + "#").c_str());
     MQTT_Client.subscribe(String(MQTT_RCS + "#").c_str());
@@ -713,6 +745,7 @@ boolean mqttReconnect() {
     Serial.print(F("MQTT connected to "));
     Serial.println(MQTT_SERVER);
   }
+  yield();
   return MQTT_Client.connected();
 }
 
@@ -733,7 +766,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   // Create string objects
   String strTopic = String(topic);
   String strMessage = String(message);
+#ifdef DEBUG
   Serial.println("MQTT " + strTopic + ": " + strMessage);
+#endif
 
   // Decompose the topic
   String strRoot, strTrunk, strBranch;
@@ -994,11 +1029,13 @@ void setup() {
 
   // Start the NTP client
   NTP_Client.begin();
+  yield();
 
   // Start the MQTT client
   MQTT_Client.setServer(MQTT_SERVER, MQTT_PORT);
   MQTT_Client.setCallback(mqttCallback);
   delayMQTT.start(MQTT_INTERVAL, AsyncDelay::MILLIS);
+  yield();
 
   // DHT timer
   delayDHT.start(DHT_INTERVAL, AsyncDelay::MILLIS);
@@ -1021,6 +1058,8 @@ void loop() {
       delayMQTT.repeat();
     }
   }
+  yield();
+
   // Rotate the LCD screens
   if (delayLCD.isExpired()) {
     lcdRotateScreens();
