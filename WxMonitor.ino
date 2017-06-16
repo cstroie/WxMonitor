@@ -20,7 +20,8 @@
 */
 
 // The DEBUG flag
-//#define DEBUG
+#define DEBUG
+#define DEVEL
 
 // LCD: use the HD447890 library and Wire i2c library
 #define SDA 0
@@ -102,13 +103,14 @@ const uint8_t LCD_BGNUM_SHAPES[8 * 8] PROGMEM = {
   B00000, B11111, B11111, B00000, B11111, B00000, B00000, B00000,
 };
 
-// NTP
-const int  TZ = 2;
-const char NTP_SERVER[] = "europe.pool.ntp.org";
-const int  NTP_INTERVAL = 765 * 1000;
-
-WiFiUDP ntpUDP;
-NTPClient NTP_Client(ntpUDP, NTP_SERVER, 3600 * TZ, NTP_INTERVAL);
+// Time synchronization and keeping
+const char    ntpServer[] PROGMEM   = "europe.pool.ntp.org";  // NTP server to connect to (RFC5905)
+const int     ntpPort               = 123;                    // NTP port
+unsigned long ntpNextSync           = 0UL;                    // Next time to syncronize
+unsigned long ntpDelta              = 0UL;                    // Difference between real time and internal clock
+bool          ntpOk                 = false;                  // Flag to know the time is accurate
+const int     ntpTZ                 = 0;                      // Time zone
+WiFiUDP       ntpClient;                                      // NTP UDP client
 
 // Wx
 String WX_STATION = "ROXX0003";
@@ -122,6 +124,7 @@ int snsReport[6][2];
 const int SNS_INTERVAL = 600 * 1000;
 
 // MQTT parameters
+// TODO FPSTR()
 #ifdef DEBUG
 const char MQTT_ID[] = "devnode-eridu-eu-org";
 #else
@@ -168,6 +171,96 @@ const String strUtfDeg = chrUtfDeg;
 const String strWinDeg = chrWinDeg;
 const String strLcdDeg = chrLcdDeg;
 
+
+/**
+  Get current time as UNIX time (1970 epoch)
+
+  @param sync flag to show whether network sync is to be performed
+  @return current UNIX time
+*/
+unsigned long timeUNIX(bool sync = true) {
+  // Check if we need to sync
+  if (millis() >= ntpNextSync and sync) {
+    // Try to get the time from Internet
+    unsigned long utm = ntpSync();
+    if (utm == 0) {
+      // Time sync has failed, sync again over one minute
+      ntpNextSync += 1UL * 60 * 1000;
+      ntpOk = false;
+      // Try to get old time from eeprom, if time delta is zero
+    }
+    else {
+      // Compute the new time delta
+      ntpDelta = utm - (millis() / 1000);
+      // Time sync has succeeded, sync again in 8 hours
+      ntpNextSync += 8UL * 60 * 60 * 1000;
+      ntpOk = true;
+      Serial.print(F("Network UNIX Time: 0x"));
+      Serial.println(utm, 16);
+    }
+  }
+  // Get current time based on uptime and time delta,
+  // or just uptime for no time sync ever
+  return (millis() / 1000) + ntpDelta;
+}
+
+/**
+  © Francesco Potortì 2013 - GPLv3 - Revision: 1.13
+
+  Send an NTP packet and wait for the response, return the Unix time
+
+  To lower the memory footprint, no buffers are allocated for sending
+  and receiving the NTP packets.  Four bytes of memory are allocated
+  for transmision, the rest is random garbage collected from the data
+  memory segment, and the received packet is read one byte at a time.
+  The Unix time is returned, that is, seconds from 1970-01-01T00:00.
+*/
+unsigned long ntpSync() {
+  // Open socket on arbitrary port
+  bool ntpOk = ntpClient.begin(12321);
+  // NTP request header: Only the first four bytes of an outgoing
+  // packet need to be set appropriately, the rest can be whatever.
+  const long ntpFirstFourBytes = 0xEC0600E3;
+  // Fail if UDP could not init a socket
+  if (!ntpOk) return 0UL;
+  // Clear received data from possible stray received packets
+  ntpClient.flush();
+  // Send an NTP request
+  char ntpServerBuf[strlen_P((char*)ntpServer) + 1];
+  strncpy_P(ntpServerBuf, (char*)ntpServer, sizeof(ntpServerBuf));
+  if (!(ntpClient.beginPacket(ntpServerBuf, ntpPort) &&
+        ntpClient.write((byte *)&ntpFirstFourBytes, 48) == 48 &&
+        ntpClient.endPacket()))
+    return 0UL;                             // sending request failed
+  // Wait for response; check every pollIntv ms up to maxPoll times
+  const int pollIntv = 150;                 // poll every this many ms
+  const byte maxPoll = 15;                  // poll up to this many times
+  int pktLen;                               // received packet length
+  for (byte i = 0; i < maxPoll; i++) {
+    if ((pktLen = ntpClient.parsePacket()) == 48) break;
+    delay(pollIntv);
+  }
+  if (pktLen != 48) return 0UL;             // no correct packet received
+  // Read and discard the first useless bytes (32 for speed, 40 for accuracy)
+  for (byte i = 0; i < 40; ++i) ntpClient.read();
+  // Read the integer part of sending time
+  unsigned long ntpTime = ntpClient.read(); // NTP time
+  for (byte i = 1; i < 4; i++)
+    ntpTime = ntpTime << 8 | ntpClient.read();
+  // Round to the nearest second if we want accuracy
+  // The fractionary part is the next byte divided by 256: if it is
+  // greater than 500ms we round to the next second; we also account
+  // for an assumed network delay of 50ms, and (0.5-0.05)*256=115;
+  // additionally, we account for how much we delayed reading the packet
+  // since its arrival, which we assume on average to be pollIntv/2.
+  ntpTime += (ntpClient.read() > 115 - pollIntv / 8);
+  // Discard the rest of the packet
+  ntpClient.flush();
+  return ntpTime - 2208988800UL;            // convert to Unix time
+}
+
+
+
 /**
   LCD initialization
 */
@@ -181,14 +274,12 @@ void lcdInit() {
   LCD display the logo
 */
 void lcdLogo() {
-  byte text[10] = {0, 1, 32, 2, 3, 4, 5, 6, 3, 7}; // "Wx Monitor"
+  byte text[] = {0, 1, 32, 2, 3, 4, 5, 6, 3, 7}; // "Wx Monitor"
   lcdDefChars(LCD_LOGO);
-  //Serial.println(text);
   lcd.clear();
   lcd.setCursor(5, 1);
-  for (byte item = 0; item < sizeof(text); item++) {
+  for (byte item = 0; item < sizeof(text); item++)
     lcd.write(text[item]);
-  }
 }
 
 /**
@@ -197,9 +288,8 @@ void lcdLogo() {
 void lcdDefBig(const uint8_t chars[]) {
   for (uint8_t i = 0; i < 8; i++) {
     uint8_t charMap[8];
-    for (uint8_t j = 0; j < 8; j++) {
+    for (uint8_t j = 0; j < 8; j++)
       charMap[j] = pgm_read_byte(chars + (j * 8) + i);
-    }
     lcd.createChar(i, charMap);
   }
 }
@@ -228,7 +318,7 @@ void lcdDefChars(int lcdCharsType) {
   @param len the length of the source array
   @return the number of columns (half the length of the source array)
 */
-byte copyArray(byte dst[], byte src[], byte len) {
+byte copyArray(byte *dst, byte *src, byte len) {
   memcpy(dst, src, len);
   return len >> 1;
 }
@@ -240,7 +330,7 @@ byte copyArray(byte dst[], byte src[], byte len) {
   @param charShapes array of needed character shapes
   @return the number of display columns the character uses
 */
-byte lcdBigConstruct(char chr, byte charShapes[]) {
+byte lcdBigConstruct(char chr, byte *charShapes, size_t len) {
   byte charCols = 0;
   switch (chr) {
     case '0': {
@@ -338,14 +428,13 @@ byte lcdBigConstruct(char chr, byte charShapes[]) {
   @param chr the character to write
   @param col the column to write the character
 */
-void lcdBigWrite(char chr, byte col) {
+void lcdBigWrite(char chr, byte col, byte row = 0) {
   byte charShapes[10];
-  byte charCols = lcdBigConstruct(chr, charShapes);
+  byte charCols = lcdBigConstruct(chr, charShapes, sizeof(charShapes));
   for (byte line = 0; line < 2; line++) {
-    lcd.setCursor(col, line);
-    for (byte item = line * charCols; item < charCols * (line + 1); item++) {
+    lcd.setCursor(col, line + row);
+    for (byte item = line * charCols; item < charCols * (line + 1); item++)
       lcd.write(byte(charShapes[item]));
-    }
   }
 }
 
@@ -356,31 +445,33 @@ void lcdBigWrite(char chr, byte col) {
   @param cols the columns to write each character
   @param type the character type to use
 */
-void lcdBigPrint(const char* text, const byte * cols, int type) {
-  if (lcdChars != type) {
-    lcdDefChars(type);
-  }
-  for (int i = 0; i <= sizeof(text); i++) {
+void lcdBigPrint(const char *text, const byte *cols, byte row = 0, int type = LCD_NUM) {
+  if (lcdChars != type) lcdDefChars(type);
+  for (int i = 0; i <= sizeof(text); i++)
     lcdBigWrite(text[i], cols[i]);
-  }
 }
 
 /**
   LCD Display the current time with big characters
 */
 bool lcdShowTime() {
-  unsigned long rawTime = NTP_Client.getEpochTime();
-  unsigned long hours = (rawTime % 86400L) / 3600;
-  unsigned long minutes = (rawTime % 3600) / 60;
-  char text[6] = "";
-  sprintf(text, "%02d:%02d", hours, minutes);
+  char buf[8] = "";
+  // Get the time, but do not open a connection to server
+  unsigned long utm = timeUNIX(false);
+  // Compute hour, minute and second
+  int hh = (utm % 86400L) / 3600;
+  int mm = (utm % 3600) / 60;
+  int ss =  utm % 60;
+  // Create the formatted time
+  snprintf_P(buf, sizeof(buf), PSTR("%02d:%02d"), hh, mm);
+  // Define the columns
   byte cols[] = {2, 6, 9, 11, 15};
-#if defined(DEBUG)
-  Serial.print("SCR_CLK ");
-  Serial.println(text);
+#ifdef DEBUG
+  Serial.print(F("SCR_CLK "));
+  Serial.println(buf);
 #endif
   lcd.clear();
-  lcdBigPrint(text, cols, LCD_NUM);
+  lcdBigPrint(buf, cols, 1, LCD_NUM);
   return true;
 }
 
@@ -389,15 +480,17 @@ bool lcdShowTime() {
 */
 bool lcdShowTemp() {
   if (dhtValid) {
-    char text[6] = "";
-    sprintf(text, "% d'C", (int)dhtTemp);
+    char buf[8] = "";
+    // Create the formatted time
+    snprintf_P(buf, sizeof(buf), PSTR("% d'C"), (int)dhtTemp);
+    // Define the columns
     byte cols[] = {4, 8, 2, 15, 17};
 #if defined(DEBUG)
     Serial.print("SCR_TEMP ");
-    Serial.println(text);
+    Serial.println(buf);
 #endif
     lcd.clear();
-    lcdBigPrint(text, cols, LCD_NUM);
+    lcdBigPrint(buf, cols, 1, LCD_NUM);
   }
   return dhtValid;
 }
@@ -407,15 +500,17 @@ bool lcdShowTemp() {
 */
 bool lcdShowHmdt() {
   if (dhtValid) {
-    char text[6] = "";
-    sprintf(text, "% d%%", (int)dhtHmdt);
+    char buf[8] = "";
+    // Create the formatted time
+    snprintf_P(buf, sizeof(buf), PSTR("% d%%"), (int)dhtHmdt);
+    // Define the columns
     byte cols[] = {4, 8, 12, 16};
 #if defined(DEBUG)
     Serial.print("SCR_HMDT ");
-    Serial.println(text);
+    Serial.println(buf);
 #endif
     lcd.clear();
-    lcdBigPrint(text, cols, LCD_NUM);
+    lcdBigPrint(buf, cols, 1, LCD_NUM);
   }
   return dhtValid;
 }
@@ -428,21 +523,21 @@ bool lcdShowHmdt() {
 bool lcdShowWiFi(bool serial) {
   if (WiFi.isConnected()) {
     if (serial == true) {
-      String text = "\nWiFi connected to ";
-      text += WiFi.SSID();
-      text += " on channel ";
-      text += WiFi.channel();
-      text += ", RSSI ";
-      text += WiFi.RSSI();
-      text += " dBm.";
-      text += "\n IP : ";
-      text += WiFi.localIP().toString();
-      text += "\n GW : ";
-      text += WiFi.gatewayIP().toString();
-      text += "\n DNS: ";
-      text += WiFi.dnsIP().toString();
-      text += "\n\n";
-      Serial.print(text);
+      Serial.println();
+      Serial.print(F("WiFi connected to "));
+      Serial.print(WiFi.SSID());
+      Serial.print(F(" on channel "));
+      Serial.print(WiFi.channel());
+      Serial.print(F(", RSSI "));
+      Serial.print(WiFi.RSSI());
+      Serial.println(F(" dBm."));
+      Serial.print(F(" IP : "));
+      Serial.println(WiFi.localIP().toString());
+      Serial.print(F(" GW : "));
+      Serial.println(WiFi.gatewayIP().toString());
+      Serial.print(F(" DNS: "));
+      Serial.println(WiFi.dnsIP().toString());
+      Serial.println();
     }
     lcd.setCursor(0, 0);
     lcd.printf("WiFi % 15s", WiFi.SSID().c_str());
@@ -504,22 +599,18 @@ bool lcdShowWeather(char* report) {
       lcd.clear();
       // Print the upper line
       lcd.setCursor(0, 0);
-      if (tplUpLn != "") {
+      if (tplUpLn != "")
         lcd.printf(tplUpLn.c_str(), wxReport[idxReport][0].c_str());
-      }
-      else {
+      else
         lcd.print(wxReport[idxReport][0].c_str());
-      }
-      //Serial.println("LN 1: " + wxReport[idxReport][0]);
+      Serial.println("LN 1: " + wxReport[idxReport][0]);
       // Print the lower line
       lcd.setCursor(0, 1);
-      if (tplLwLn != "") {
+      if (tplLwLn != "")
         lcd.printf(tplLwLn.c_str(), wxReport[idxReport][1].c_str());
-      }
-      else {
+      else
         lcd.print(wxReport[idxReport][1].c_str());
-      }
-      //Serial.println("LN 2: " + wxReport[idxReport][1]);
+      Serial.println("LN 2: " + wxReport[idxReport][1]);
       return true;
     }
   }
@@ -592,7 +683,7 @@ bool lcdShowSensor(char* sensor) {
   @param upLine text to print on upper line
   @param lwLine text to print on lower line
 */
-void lcdScreen(char* upLine, char* lwLine) {
+void lcdScreen(char *upLine, char *lwLine) {
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(upLine);
@@ -1027,8 +1118,8 @@ void setup() {
   // Connected
   lcdShowWiFi(true);
 
-  // Start the NTP client
-  NTP_Client.begin();
+  // Start time sync
+  timeUNIX();
   yield();
 
   // Start the MQTT client
@@ -1087,7 +1178,4 @@ void loop() {
     // Repeat
     delayDHT.repeat();
   }
-
-  // NTP
-  NTP_Client.update();
 }
