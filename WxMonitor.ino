@@ -24,8 +24,8 @@
 #define DEVEL
 
 // LCD: use the HD447890 library and Wire i2c library
-#define SDA 0
-#define SCL 2
+//#define SDA 0
+//#define SCL 2
 #include <Wire.h>
 #include <hd44780.h>
 #include <hd44780ioClass/hd44780_I2Cexp.h> // include i/o class header
@@ -36,9 +36,7 @@
 #include <WiFiUdp.h>
 
 // NTP
-//#include <NtpClientLib.h>
-#include <TimeLib.h>
-#include <NTPClient.h>
+//#include <TimeLib.h>
 
 // Timer
 #include <AsyncDelay.h>
@@ -54,15 +52,14 @@
 
 
 // Device name
-#ifdef DEBUG
-String NODENAME = "DevNode";
-String LC_NODENAME = "devnode";
-String VERSION = "0.4";
+#if defined(DEBUG)
+const char NODENAME[] = "DevNode";
+const char nodename[] = "devnode";
 #else
-String NODENAME = "WxMon";
-String LC_NODENAME = "wxmon";
-String VERSION = "3.0";
+const char NODENAME[] = "WxMon";
+const char nodename[] = "wxmon";
 #endif
+const char VERSION[]  = "3.1";
 
 // LCD
 #define WIRECLOCK     400000L   // tell hd44780 to use 400kHz i2c clock rate
@@ -109,11 +106,11 @@ const int     ntpPort               = 123;                    // NTP port
 unsigned long ntpNextSync           = 0UL;                    // Next time to syncronize
 unsigned long ntpDelta              = 0UL;                    // Difference between real time and internal clock
 bool          ntpOk                 = false;                  // Flag to know the time is accurate
-const int     ntpTZ                 = 0;                      // Time zone
+const int     ntpTZ                 = 3;                      // Time zone
 WiFiUDP       ntpClient;                                      // NTP UDP client
 
 // Wx
-String WX_STATION = "ROXX0003";
+const char wxStation[] = "ROXX0003";
 String strReports = "now tod ton tom dat sun mon bar ";
 String wxReport[8][2];
 String strLnSep = ", ";
@@ -126,21 +123,20 @@ const int SNS_INTERVAL = 600 * 1000;
 // MQTT parameters
 // TODO FPSTR()
 #ifdef DEBUG
-const char MQTT_ID[] = "devnode-eridu-eu-org";
+const char mqttId[]       = "devnode-eridu-eu-org";
 #else
-const char MQTT_ID[] = "wxmon-eridu-eu-org";
+const char mqttId[]       = "wxmon-eridu-eu-org";
 #endif
-const char MQTT_SERVER[] = "eridu.eu.org";
-const int  MQTT_PORT = 1883;
-const int  MQTT_INTERVAL = 5000;
-String MQTT_WX      = "wx/" + WX_STATION + "/";
-String MQTT_CMD     = "command/" + LC_NODENAME + "/";
-String MQTT_RCS     = "command/rcs/";
-String MQTT_REPORT  = "report/" + LC_NODENAME;
-String MQTT_REPORT_WIFI = MQTT_REPORT + "/wifi";
-String MQTT_SENSOR  = "sensor/indoor"; // + LC_NODENAME;
+const char mqttServer[]   = "eridu.eu.org";
+const int  mqttPort       = 1883;
+const int  mqttDelay      = 5000;
+const char mqttTopicWx[]  = "wx";
+const char mqttTopicCmd[] = "command";
+const char mqttTopicSns[] = "sensor";
+const char mqttTopicRpt[] = "report";
+
 WiFiClient WiFi_Client;
-PubSubClient MQTT_Client(WiFi_Client);
+PubSubClient mqttClient(WiFi_Client);
 AsyncDelay delayMQTT;
 
 // DHT
@@ -171,6 +167,13 @@ const String strUtfDeg = chrUtfDeg;
 const String strWinDeg = chrWinDeg;
 const String strLcdDeg = chrLcdDeg;
 
+/**
+  Convert IPAddress to char array
+*/
+char charIP(const IPAddress ip, char *buf, size_t len, boolean pad = false) {
+  if (pad) snprintf_P(buf, len, PSTR("%3d.%3d.%3d.%3d"), ip[0], ip[1], ip[2], ip[3]);
+  else     snprintf_P(buf, len, PSTR("%d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
+}
 
 /**
   Get current time as UNIX time (1970 epoch)
@@ -201,7 +204,7 @@ unsigned long timeUNIX(bool sync = true) {
   }
   // Get current time based on uptime and time delta,
   // or just uptime for no time sync ever
-  return (millis() / 1000) + ntpDelta;
+  return (millis() / 1000) + ntpDelta + ntpTZ * 3600;
 }
 
 /**
@@ -522,31 +525,36 @@ bool lcdShowHmdt() {
 */
 bool lcdShowWiFi(bool serial) {
   if (WiFi.isConnected()) {
-    if (serial == true) {
-      Serial.println();
-      Serial.print(F("WiFi connected to "));
-      Serial.print(WiFi.SSID());
-      Serial.print(F(" on channel "));
-      Serial.print(WiFi.channel());
-      Serial.print(F(", RSSI "));
-      Serial.print(WiFi.RSSI());
-      Serial.println(F(" dBm."));
-      Serial.print(F(" IP : "));
-      Serial.println(WiFi.localIP().toString());
-      Serial.print(F(" GW : "));
-      Serial.println(WiFi.gatewayIP().toString());
-      Serial.print(F(" DNS: "));
-      Serial.println(WiFi.dnsIP().toString());
-      Serial.println();
-    }
+    char ipbuf[16], gwbuf[16], nsbuf[16];
+
+    charIP(WiFi.localIP(), ipbuf, sizeof(ipbuf), true);
+    charIP(WiFi.gatewayIP(), gwbuf, sizeof(ipbuf), true);
+    charIP(WiFi.dnsIP(), nsbuf, sizeof(ipbuf), true);
+
+    Serial.println();
+    Serial.print(F("WiFi connected to "));
+    Serial.print(WiFi.SSID());
+    Serial.print(F(" on channel "));
+    Serial.print(WiFi.channel());
+    Serial.print(F(", RSSI "));
+    Serial.print(WiFi.RSSI());
+    Serial.println(F(" dBm."));
+    Serial.print(F(" IP : "));
+    Serial.println(ipbuf);
+    Serial.print(F(" GW : "));
+    Serial.println(gwbuf);
+    Serial.print(F(" DNS: "));
+    Serial.println(nsbuf);
+    Serial.println();
+
     lcd.setCursor(0, 0);
     lcd.printf("WiFi % 15s", WiFi.SSID().c_str());
     lcd.setCursor(0, 1);
-    lcd.printf("  IP% 16s", WiFi.localIP().toString().c_str());
+    lcd.printf("  IP% 16s", ipbuf);
     lcd.setCursor(0, 2);
-    lcd.printf("  GW% 16s", WiFi.gatewayIP().toString().c_str());
+    lcd.printf("  GW% 16s", gwbuf);
     lcd.setCursor(0, 3);
-    lcd.printf(" DNS% 16s", WiFi.dnsIP().toString().c_str());
+    lcd.printf(" DNS% 16s", nsbuf);
     return true;
   }
   else return false;
@@ -797,7 +805,7 @@ void lcdRotateScreens() {
 */
 boolean mqttPubRetain(const String &topic, const String &payload) {
   yield();
-  return MQTT_Client.publish(topic.c_str(), payload.c_str(), true);
+  return mqttClient.publish(topic.c_str(), payload.c_str(), true);
 }
 
 /** MQTT publishing wrapper, using strings
@@ -808,7 +816,62 @@ boolean mqttPubRetain(const String &topic, const String &payload) {
 */
 boolean mqttPub(const String &topic, const String &payload) {
   yield();
-  return MQTT_Client.publish(topic.c_str(), payload.c_str(), false);
+  return mqttClient.publish(topic.c_str(), payload.c_str(), false);
+}
+
+/**
+  Publish to topic
+*/
+boolean mqttPub(const char *payload, const char *lvl1, const char *lvl2 = NULL, const char *lvl3 = NULL, const boolean retain = false) {
+  char buf[64];
+  strcpy(buf, lvl1);
+  if (lvl2 != NULL) {
+    strcat(buf, "/");
+    strcat(buf, lvl2);
+  }
+  if (lvl3 != NULL) {
+    strcat(buf, "/");
+    strcat(buf, lvl3);
+  }
+  yield();
+  return mqttClient.publish(buf, payload, retain);
+}
+
+/**
+  Publish to topic and retain
+*/
+boolean mqttPubRet(const char *payload, const char *lvl1, const char *lvl2 = NULL, const char *lvl3 = NULL, const boolean retain = true) {
+  return mqttPub(payload, lvl1, lvl2, lvl3, retain);
+}
+
+/**
+  Publish to topic
+*/
+boolean mqttPub(const int payload, const char *lvl1, const char *lvl2 = NULL, const char *lvl3 = NULL, const boolean retain = false) {
+  char buf[8];
+  sprintf(buf, "%d", payload);
+  return mqttPub(buf, lvl1, lvl2, lvl3, retain);
+}
+
+/**
+  Publish to topic and retain
+*/
+boolean mqttPubRet(const int payload, const char *lvl1, const char *lvl2 = NULL, const char *lvl3 = NULL, const boolean retain = true) {
+  return mqttPub(payload, lvl1, lvl2, lvl3, retain);
+}
+
+/**
+  Subscribe to all subtopics in topic or topic/subtopic
+*/
+void mqttSubscribeAll(const char *lvl1, const char *lvl2 = NULL) {
+  char buf[64];
+  strcpy(buf, lvl1);
+  if (lvl2 != NULL) {
+    strcat(buf, "/");
+    strcat(buf, lvl2);
+  }
+  strcat(buf, "/#");
+  mqttClient.subscribe(buf);
 }
 
 /**
@@ -818,26 +881,34 @@ boolean mqttPub(const String &topic, const String &payload) {
 */
 boolean mqttReconnect() {
   Serial.println(F("MQTT connecting..."));
-  if (MQTT_Client.connect(MQTT_ID)) {
+  if (mqttClient.connect(mqttId)) {
     // Publish the connection report
-    mqttPubRetain(MQTT_REPORT_WIFI + "/hostname", WiFi.hostname());
-    mqttPubRetain(MQTT_REPORT_WIFI + "/hostname", WiFi.hostname());
-    mqttPubRetain(MQTT_REPORT_WIFI + "/mac",      WiFi.macAddress());
-    mqttPubRetain(MQTT_REPORT_WIFI + "/ssid",     WiFi.SSID());
-    mqttPubRetain(MQTT_REPORT_WIFI + "/rssi",     String(WiFi.RSSI()));
-    mqttPubRetain(MQTT_REPORT_WIFI + "/ip",       WiFi.localIP().toString());
-    mqttPubRetain(MQTT_REPORT_WIFI + "/gw",       WiFi.gatewayIP().toString());
+    char buf[32];
+    strcpy(buf, mqttTopicRpt);
+    strcat(buf, "/");
+    strcat(buf, nodename);
+    strcat(buf, "/");
+    strcat(buf, "wifi");
+    mqttPubRet(WiFi.hostname().c_str(), buf, "hostname");
+    mqttPubRet(WiFi.macAddress().c_str(), buf, "mac");
+    mqttPubRet(WiFi.SSID().c_str(), buf, "ssid");
+    mqttPubRet(WiFi.RSSI(), buf, "rssi");
+    char ipbuf[16];
+    charIP(WiFi.localIP(), ipbuf, sizeof(ipbuf));
+    mqttPubRet(ipbuf, buf, "ip");
+    charIP(WiFi.gatewayIP(), ipbuf, sizeof(ipbuf));
+    mqttPubRet(ipbuf, buf, "gw");
     // Subscribe
-    MQTT_Client.subscribe(String(MQTT_CMD + "#").c_str());
-    MQTT_Client.subscribe(String(MQTT_RCS + "#").c_str());
-    MQTT_Client.subscribe(String(MQTT_WX  + "#").c_str());
-    // TODO
-    MQTT_Client.subscribe("sensor/#");
+    mqttSubscribeAll(mqttTopicCmd, nodename);   // Subscribe to command topic
+    mqttSubscribeAll(mqttTopicCmd, "rcs");      // Subscribe to RCS command topic
+    mqttSubscribeAll(mqttTopicWx,  wxStation);  // Subscribe to weather topic
+    mqttSubscribeAll(mqttTopicSns, "outdoor");  // Subscribe to outdoor sensors topic
+
     Serial.print(F("MQTT connected to "));
-    Serial.println(MQTT_SERVER);
+    Serial.println(mqttServer);
   }
   yield();
-  return MQTT_Client.connected();
+  return mqttClient.connected();
 }
 
 /**
@@ -881,7 +952,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 #endif
 
       // Dispatcher
-      if (strRoot == "wx" && strTrunk == WX_STATION) {
+      if (strRoot == "wx" && strTrunk == wxStation) {
         wxProcess(strBranch, strMessage);
       }
       else if (strRoot == "sensor") {
@@ -891,7 +962,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         if (strTrunk == "rcs") {
           rcsProcess(strBranch, strMessage);
         }
-        else if (strTrunk == LC_NODENAME) {
+        else if (strTrunk == nodename) {
           if (strBranch == "restart") {
             ESP.restart();
           }
@@ -1093,7 +1164,7 @@ void setup() {
   Serial.println();
   Serial.begin(115200);
   Serial.print(NODENAME);
-  Serial.print(" ");
+  Serial.print(F(" "));
   Serial.println(__DATE__);
 
   // RCS
@@ -1106,8 +1177,7 @@ void setup() {
   WiFiManager wifiManager;
   wifiManager.setTimeout(300);
   wifiManager.setAPCallback(wifiCallback);
-  wifiManager.autoConnect(NODENAME.c_str());
-  while (!wifiManager.autoConnect(NODENAME.c_str())) {
+  while (!wifiManager.autoConnect(NODENAME)) {
     String strMsg = "No WiFi network ";
     Serial.println(strMsg);
     lcd.setCursor(0, 1);
@@ -1123,9 +1193,9 @@ void setup() {
   yield();
 
   // Start the MQTT client
-  MQTT_Client.setServer(MQTT_SERVER, MQTT_PORT);
-  MQTT_Client.setCallback(mqttCallback);
-  delayMQTT.start(MQTT_INTERVAL, AsyncDelay::MILLIS);
+  mqttClient.setServer(mqttServer, mqttPort);
+  mqttClient.setCallback(mqttCallback);
+  delayMQTT.start(mqttDelay, AsyncDelay::MILLIS);
   yield();
 
   // DHT timer
@@ -1142,8 +1212,8 @@ void setup() {
 
 void loop() {
   // Process incoming MQTT messages and maintain connection
-  if (!MQTT_Client.loop()) {
-    // Not connected, try to reconnect every MQTT_INTERVAL seconds
+  if (!mqttClient.loop()) {
+    // Not connected, try to reconnect every mqttDelay seconds
     if (delayMQTT.isExpired()) {
       mqttReconnect();
       delayMQTT.repeat();
@@ -1163,18 +1233,33 @@ void loop() {
   // Read the sensors and publish telemetry
   if (delayDHT.isExpired()) {
     dhtRead();
+    // Publish DHT data
     if (dhtValid) {
-      char text[4] = "";
+      char text[8] = "";
       sprintf(text, "%d", (int)dhtTemp);
-      MQTT_Client.publish(String(MQTT_SENSOR + "/temperature").c_str(), text);
+      mqttPub(text, mqttTopicSns, "indoor", "temperature");
       sprintf(text, "%d", (int)dhtHmdt);
-      MQTT_Client.publish(String(MQTT_SENSOR + "/humidity").c_str(), text);
+      mqttPub(text, mqttTopicSns, "indoor", "humidity");
     };
-    MQTT_Client.publish(String(MQTT_REPORT_WIFI + "/rssi").c_str(), String(WiFi.RSSI()).c_str());
-    MQTT_Client.publish(String(MQTT_REPORT + "/uptime").c_str(), String(millis() / 1000).c_str());
-    MQTT_Client.publish(String(MQTT_REPORT + "/heap").c_str(), String(ESP.getFreeHeap()).c_str());
-    int vcc = ESP.getVcc();
-    MQTT_Client.publish(String(MQTT_REPORT + "/vcc").c_str(), String(String(vcc / 1000) + "." + String(vcc % 1000)).c_str());
+    
+    // Publish the connection report
+    char topic[32], buf[16];
+    // Create the topic
+    strcpy(topic, mqttTopicRpt);
+    strcat(topic, "/");
+    strcat(topic, nodename);
+    // Create and publish the reports
+    snprintf_P(buf, sizeof(buf), PSTR("%d"), millis() / 1000);
+    mqttPubRet(buf, topic, "uptime");
+    snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getFreeHeap());
+    mqttPubRet(buf, topic, "heap");
+    snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getVcc());
+    mqttPubRet(buf, topic, "vcc");
+    // Add the WiFi topic
+    strcat(topic, "/");
+    strcat(topic, "wifi");
+    mqttPubRet(WiFi.RSSI(), topic, "rssi");
+
     // Repeat
     delayDHT.repeat();
   }
