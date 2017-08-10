@@ -70,8 +70,8 @@ hd44780_I2Cexp        lcd;      // auto locate and autoconfig interface pins
 const int PIR_PIN = D5;
 const int LCD_INTERVAL = 4 * 1000;
 const int PIR_INTERVAL = 300 * 1000;
-enum LCD_SCREENS {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON};
-enum LCD_CHARS {LCD_LOGO, LCD_NUM, LCD_MOON};
+enum LCD_SCREENS {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON, SCR_ALL};
+enum LCD_CHARS {LCD_LOGO, LCD_NUM, LCD_MOON, LCD_ALL};
 
 AsyncDelay delayLCD;
 AsyncDelay delayPIR;
@@ -113,8 +113,9 @@ WiFiUDP       ntpClient;                                      // NTP UDP client
 
 // Wx
 const char wxStation[] = "ROXX0003";
-String strReports = "now tod ton tom dat sun mon bar ";
-String wxReport[8][2];
+enum WX_REPKEYS {WX_NOW, WX_TOD, WX_TON, WX_TOM, WX_DAT, WX_SUN, WX_MON, WX_BAR, WX_ALL};
+char wxRepKeys[][4] = {"now", "tod", "ton", "tom", "dat", "sun", "mon", "bar"};
+String wxReport[WX_ALL][2];
 String strLnSep = ", ";
 
 // Sensors
@@ -567,62 +568,58 @@ bool lcdShowWiFi(bool serial) {
 
   @param report the report to display
 */
-bool lcdShowWeather(char* report) {
+bool lcdShowWeather(int report) {
   String tplUpLn, tplLwLn;
-  int idxReport = strReports.indexOf(String(report) + " ");
-  if (idxReport != -1) {
-    idxReport >> 2;
-    if (wxReport[idxReport][0] != "") {
-      if (report == "now") {
-        tplUpLn = "Now% 17s";
-        tplLwLn = "";
-      }
-      else if (report == "tod") {
-        tplUpLn = "Today  % 13s";
-        tplLwLn = "";
-      }
-      else if (report == "ton") {
-        tplUpLn = "Tonight% 13s";
-        tplLwLn = "";
-      }
-      else if (report == "tom") {
-        tplUpLn = "Tmrrow % 13s";
-        tplLwLn = "";
-      }
-      else if (report == "dat") {
-        tplUpLn = "AfTmrw % 13s";
-        tplLwLn = "";
-      }
-      else if (report == "sun") {
-        tplUpLn = "Sunrise % 12s";
-        tplLwLn = "Sunset  % 12s";
-      }
-      else if (report == "mon") {
-        tplUpLn = "Moon % 15s";
-        tplLwLn = "";
-      }
-      else if (report == "bar") {
-        tplUpLn = "Baro% 16s";
-        tplLwLn = "";
-      }
-      // Clear the screen
-      lcd.clear();
-      // Print the upper line
-      lcd.setCursor(0, 0);
-      if (tplUpLn != "")
-        lcd.printf(tplUpLn.c_str(), wxReport[idxReport][0].c_str());
-      else
-        lcd.print(wxReport[idxReport][0].c_str());
-      Serial.println("LN 1: " + wxReport[idxReport][0]);
-      // Print the lower line
-      lcd.setCursor(0, 1);
-      if (tplLwLn != "")
-        lcd.printf(tplLwLn.c_str(), wxReport[idxReport][1].c_str());
-      else
-        lcd.print(wxReport[idxReport][1].c_str());
-      Serial.println("LN 2: " + wxReport[idxReport][1]);
-      return true;
+  if (wxReport[report][0][0] != '\0') {
+    if (report == WX_NOW) {
+      tplUpLn = "Now% 17s";
+      tplLwLn = "";
     }
+    else if (report == WX_TOD) {
+      tplUpLn = "Today  % 13s";
+      tplLwLn = "";
+    }
+    else if (report == WX_TON) {
+      tplUpLn = "Tonight% 13s";
+      tplLwLn = "";
+    }
+    else if (report == WX_TOM) {
+      tplUpLn = "Tmrrow % 13s";
+      tplLwLn = "";
+    }
+    else if (report == WX_DAT) {
+      tplUpLn = "AfTmrw % 13s";
+      tplLwLn = "";
+    }
+    else if (report == WX_SUN) {
+      tplUpLn = "Sunrise % 12s";
+      tplLwLn = "Sunset  % 12s";
+    }
+    else if (report == WX_MON) {
+      tplUpLn = "Moon % 15s";
+      tplLwLn = "";
+    }
+    else if (report == WX_BAR) {
+      tplUpLn = "Baro% 16s";
+      tplLwLn = "";
+    }
+    // Clear the screen
+    lcd.clear();
+    // Print the upper line
+    lcd.setCursor(0, 0);
+    if (tplUpLn != "")
+      lcd.printf(tplUpLn.c_str(), wxReport[report][0].c_str());
+    else
+      lcd.print(wxReport[report][0].c_str());
+    Serial.println("LN 1: " + wxReport[report][0]);
+    // Print the lower line
+    lcd.setCursor(0, 1);
+    if (tplLwLn != "")
+      lcd.printf(tplLwLn.c_str(), wxReport[report][1].c_str());
+    else
+      lcd.print(wxReport[report][1].c_str());
+    Serial.println("LN 2: " + wxReport[report][1]);
+    return true;
   }
   return false;
 }
@@ -740,28 +737,28 @@ int lcdShowScreen(int index) {
       result = lcdShowSensor("ops");
       break;
     case SCR_NOW:
-      result = lcdShowWeather("now");
+      result = lcdShowWeather(WX_NOW);
       break;
     case SCR_TOD:
-      result = lcdShowWeather("tod");
+      result = lcdShowWeather(WX_TOD);
       break;
     case SCR_TON:
-      result = lcdShowWeather("ton");
+      result = lcdShowWeather(WX_TON);
       break;
     case SCR_TOM:
-      result = lcdShowWeather("tom");
+      result = lcdShowWeather(WX_TOM);
       break;
     case SCR_DAT:
-      result = lcdShowWeather("dat");
+      result = lcdShowWeather(WX_DAT);
       break;
     case SCR_BAR:
-      result = lcdShowWeather("bar");
+      result = lcdShowWeather(WX_BAR);
       break;
     case SCR_SUN:
-      result = lcdShowWeather("sun");
+      result = lcdShowWeather(WX_SUN);
       break;
     case SCR_MON:
-      result = lcdShowWeather("mon");
+      result = lcdShowWeather(WX_MON);
       break;
     default:
       result = lcdShowTime();
@@ -954,9 +951,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 #endif
 
       // Dispatcher
-      if (strRoot == "wx" && strTrunk == wxStation) {
-        wxProcess(strBranch, strMessage);
-      }
+      if (strRoot == "wx" && strTrunk == wxStation)
+        wxProcess(strBranch.c_str(), strMessage);
       else if (strRoot == "sensor") {
         snsProcess(strTopic.substring(idxSepOne + 1), strMessage);
       }
@@ -991,11 +987,16 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   @param strBranch the MQTT branch topic
   @param strMessage the MQTT message
 */
-void wxProcess(String strBranch, String strMessage) {
-  // Check the report index
-  int idxReport = strReports.indexOf(strBranch + " ");
-  if (idxReport != -1) {
-    idxReport /= 4;
+void wxProcess(const char *branch, String strMessage) {
+  // Find the report index starting from the key
+  int idxReport = 0;
+  while (idxReport < WX_ALL) {
+    if (strcmp(branch, wxRepKeys[idxReport]) == 0)
+      break;
+    idxReport++;
+  };
+  // Check if the index has been found
+  if (idxReport >= 0 and idxReport < WX_ALL) {
     // Convert from UTF-8 or CP1252 to LCD charset
     strMessage.replace(strUtfDeg, strLcdDeg);
     strMessage.replace(strWinDeg, strLcdDeg);
@@ -1006,8 +1007,8 @@ void wxProcess(String strBranch, String strMessage) {
       wxReport[idxReport][0] = strMessage.substring(0, idxLnSep);
       wxReport[idxReport][1] = strMessage.substring(idxLnSep + 2);
       // The 'tod' and 'ton' reports are mutually exclusive
-      if      (strBranch == "tod") wxClear("ton");
-      else if (strBranch == "ton") wxClear("tod");
+      if      (idxReport == WX_TOD) wxClear(WX_TON);
+      else if (idxReport == WX_TON) wxClear(WX_TOD);
     }
   }
 }
@@ -1017,10 +1018,9 @@ void wxProcess(String strBranch, String strMessage) {
 
   @param report the report to be clean
 */
-void wxClear(String report) {
-  int idxReport = strReports.indexOf(report + " ");
-  if (idxReport != -1) {
-    idxReport /= 4;
+void wxClear(int idxReport) {
+  // Check if the index is valid
+  if (idxReport >= 0 and idxReport < WX_ALL) {
     wxReport[idxReport][0] = "";
     wxReport[idxReport][1] = "";
   }
@@ -1153,7 +1153,7 @@ void pirInterrupt() {
 /**
   Feedback notification when SoftAP is started
 */
-void wifiCallback (WiFiManager *wifiMgr) {
+void wifiCallback (WiFiManager * wifiMgr) {
   String strMsg = "Connect to ";
   strMsg += wifiMgr->getConfigPortalSSID();
   Serial.println(strMsg);
