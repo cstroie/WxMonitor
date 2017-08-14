@@ -778,12 +778,10 @@ int lcdShowScreen(int index) {
       result = lcdShowTime();
       return -1;
   }
-  if (result == true) {
+  if (result == true)
     return index + 1;
-  }
-  else {
+  else
     return 0;
-  }
 }
 
 /**
@@ -797,12 +795,10 @@ void lcdRotateScreens() {
       lcdIndex = 1;
       nextIndex = 1;
     }
-    else if (nextIndex == 0) {
+    else if (nextIndex == 0)
       lcdIndex += 1;
-    }
-    else {
+    else
       lcdIndex = nextIndex;
-    }
 #if defined(DEBUG)
     Serial.print(F("SCR_NXT "));
     Serial.println(nextIndex);
@@ -988,11 +984,8 @@ void wxProcess(const char *report, char *message) {
   // Find the report index starting from the key
   int idxReport = 0;
   while (idxReport < WX_ALL)
-    // FIXME
-    if (strcmp(report, wxRepKeys[idxReport++]) == 0) {
+    if (strcmp(report, wxRepKeys[idxReport++]) == 0)
       break;
-      //idxReport++;
-    }
   // Check if the index has been found
   idxReport--;
   if (idxReport >= 0 and idxReport < WX_ALL) {
@@ -1021,11 +1014,11 @@ void wxProcess(const char *report, char *message) {
 
   @param report the report to be clean
 */
-void wxClear(int idxReport) {
+void wxClear(int report) {
   // Check if the index is valid
-  if (idxReport >= 0 and idxReport < WX_ALL) {
-    wxReport[idxReport][0][0] = '\0';
-    wxReport[idxReport][1][0] = '\0';
+  if (report >= 0 and report < WX_ALL) {
+    wxReport[report][0][0] = '\0';
+    wxReport[report][1][0] = '\0';
   }
 }
 
@@ -1045,7 +1038,7 @@ void snsProcess(const char *sensor, char *message) {
     idxReport = SNS_ODP;
   else if (strcmp(sensor, "sealevel") == 0)
     idxReport = SNS_OPS;
-
+  // Store the sensor data and age
   snsReport[idxReport][0] = atoi(message);
   snsReport[idxReport][1] = millis() / 1000;
 }
@@ -1061,16 +1054,10 @@ void rcsProcess(const char *button, char *message) {
 
   // Valid buttons are A..E
   if (btn >= 'A' and btn <= 'E') {
-    if (strncmp(message, "ON", 2) == 0) {
+    if (strncmp(message, "ON", 2) == 0)
       rcs.switchOn(rcsHomeCode, command[btn - 'A']);
-      //Serial.print(strBranch);
-      //Serial.println("ON");
-    }
-    else if (strncmp(message, "OFF", 3) == 0) {
+    else if (strncmp(message, "OFF", 3) == 0)
       rcs.switchOff(rcsHomeCode, command[btn - 'A']);
-      //Serial.print(btn);
-      //Serial.println("OFF");
-    }
   }
 }
 
@@ -1087,9 +1074,8 @@ bool dhtRead() {
     dhtValid = false;
     Serial.println(F("Failed to read from DHT sensor!"));
   }
-  else {
+  else
     dhtValid = true;
-  }
   return dhtValid;
 }
 
@@ -1230,6 +1216,7 @@ void loop() {
     delayLCD.repeat();
   }
   // Check if motion detection has expired
+  // FIXME runs  on every loop
   if (delayPIR.isExpired()) {
     lcd.noBacklight();
   }
