@@ -61,12 +61,14 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.1";
+const char VERSION[]  = "3.2";
 
 // LCD
 #define WIRECLOCK     400000L   // tell hd44780 to use 400kHz i2c clock rate
 hd44780_I2Cexp        lcd;      // auto locate and autoconfig interface pins
 #define HD44780_LCDOBJECT       // tell the hd44780 sketch the lcd object has been declared
+const int LCD_COLS = 20;
+const int LCD_ROWS = 4;
 const int PIR_PIN = D5;
 const int LCD_INTERVAL = 4 * 1000;
 const int PIR_INTERVAL = 300 * 1000;
@@ -115,12 +117,11 @@ WiFiUDP       ntpClient;                                      // NTP UDP client
 const char wxStation[] = "ROXX0003";
 enum WX_REPKEYS {WX_NOW, WX_TOD, WX_TON, WX_TOM, WX_DAT, WX_SUN, WX_MON, WX_BAR, WX_ALL};
 char wxRepKeys[][4] = {"now", "tod", "ton", "tom", "dat", "sun", "mon", "bar"};
-String wxReport[WX_ALL][2];
-String strLnSep = ", ";
+char wxReport[WX_ALL][2][LCD_COLS];
 
 // Sensors
-String strSensors = "itp ihm otp ohm odp ops ";
-int snsReport[6][2];
+enum SNS_KEYS {SNS_ITP, SNS_IHM, SNS_OTP, SNS_OHM, SNS_ODP, SNS_OPS, SNS_ALL};
+int snsReport[SNS_ALL][2];
 const int SNS_INTERVAL = 600 * 1000;
 
 // MQTT parameters
@@ -162,13 +163,26 @@ const int BEEP_PIN = D10;
 // Voltage
 ADC_MODE(ADC_VCC);
 
-// FIXME Character transformation
+// Character transformation
 const char chrUtfDeg[] = {194, 176, 0};
 const char chrWinDeg[] = {176, 0};
 const char chrLcdDeg[] = {223, 0};
-const String strUtfDeg = chrUtfDeg;
-const String strWinDeg = chrWinDeg;
-const String strLcdDeg = chrLcdDeg;
+
+/**
+  Replace a substring
+*/
+void strrpl(char string[], const char *search, const char *replace) {
+  char buffer[100];
+  char *p = string;
+  while ((p = strstr(p, search))) {
+    strncpy(buffer, string, p - string);
+    buffer[p - string] = '\0';
+    strcat(buffer, replace);
+    strcat(buffer, p + strlen(search));
+    strcpy(string, buffer);
+    p++;
+  }
+}
 
 /**
   Convert IPAddress to char array
@@ -608,17 +622,19 @@ bool lcdShowWeather(int report) {
     // Print the upper line
     lcd.setCursor(0, 0);
     if (tplUpLn != "")
-      lcd.printf(tplUpLn.c_str(), wxReport[report][0].c_str());
+      lcd.printf(tplUpLn.c_str(), wxReport[report][0]);
     else
-      lcd.print(wxReport[report][0].c_str());
-    Serial.println("LN 1: " + wxReport[report][0]);
+      lcd.print(wxReport[report][0]);
+    Serial.print("LN 1: ");
+    Serial.println(wxReport[report][0]);
     // Print the lower line
     lcd.setCursor(0, 1);
     if (tplLwLn != "")
-      lcd.printf(tplLwLn.c_str(), wxReport[report][1].c_str());
+      lcd.printf(tplLwLn.c_str(), wxReport[report][1]);
     else
-      lcd.print(wxReport[report][1].c_str());
-    Serial.println("LN 2: " + wxReport[report][1]);
+      lcd.print(wxReport[report][1]);
+    Serial.print("LN 2: ");
+    Serial.println(wxReport[report][1]);
     return true;
   }
   return false;
@@ -629,58 +645,56 @@ bool lcdShowWeather(int report) {
 
   @param sensor the sensor to display
 */
-bool lcdShowSensor(char* sensor) {
+bool lcdShowSensor(int sensor) {
   char text[6] = "";
-  int idxReport = strSensors.indexOf(String(sensor) + " ");
-  if (idxReport != -1) {
-    idxReport /= 4;
-    if (snsReport[idxReport][1] > 0) {
-      if      (sensor == "otp") {
-        sprintf(text, "% d'C", snsReport[idxReport][0]);
-        byte cols[] = {0, 4, 8, 11, 13};
+
+  if (snsReport[sensor][1] > 0) {
+    if      (sensor == SNS_OTP) {
+      sprintf(text, "% d'C", snsReport[sensor][0]);
+      byte cols[] = {0, 4, 8, 11, 13};
 #if defined(DEBUG)
-        Serial.print("SCR_OTP ");
-        Serial.println(text);
+      Serial.print("SCR_OTP ");
+      Serial.println(text);
 #endif
-        lcd.clear();
-        lcdBigPrint(text, cols, LCD_NUM);
-      }
-      else if (sensor == "ohm") {
-        sprintf(text, "% d%%", snsReport[idxReport][0]);
-        byte cols[] = {0, 4, 8, 12};
-#if defined(DEBUG)
-        Serial.print("SCR_OHM ");
-        Serial.println(text);
-#endif
-        lcd.clear();
-        lcdBigPrint(text, cols, LCD_NUM);
-      }
-      else if (sensor == "odp") {
-        sprintf(text, "% d'C", snsReport[idxReport][0]);
-        byte cols[] = {0, 4, 8, 11, 13};
-#if defined(DEBUG)
-        Serial.print("SCR_ODP ");
-        Serial.println(text);
-#endif
-        lcd.clear();
-        lcdBigPrint(text, cols, LCD_NUM);
-      }
-      else if (sensor == "ops") {
-        sprintf(text, "% d", snsReport[idxReport][0]);
-        byte cols[] = {0, 4, 8, 12};
-#if defined(DEBUG)
-        Serial.print("SCR_OPS ");
-        Serial.println(text);
-#endif
-        lcd.clear();
-        lcdBigPrint(text, cols, LCD_NUM);
-      }
-      if (snsReport[idxReport][1] + SNS_INTERVAL < millis()) {
-        snsClear(sensor);
-      }
-      return true;
+      lcd.clear();
+      lcdBigPrint(text, cols, LCD_NUM);
     }
+    else if (sensor == SNS_OHM) {
+      sprintf(text, "% d%%", snsReport[sensor][0]);
+      byte cols[] = {0, 4, 8, 12};
+#if defined(DEBUG)
+      Serial.print("SCR_OHM ");
+      Serial.println(text);
+#endif
+      lcd.clear();
+      lcdBigPrint(text, cols, LCD_NUM);
+    }
+    else if (sensor == SNS_ODP) {
+      sprintf(text, "% d'C", snsReport[sensor][0]);
+      byte cols[] = {0, 4, 8, 11, 13};
+#if defined(DEBUG)
+      Serial.print("SCR_ODP ");
+      Serial.println(text);
+#endif
+      lcd.clear();
+      lcdBigPrint(text, cols, LCD_NUM);
+    }
+    else if (sensor == SNS_OPS) {
+      sprintf(text, "% d", snsReport[sensor][0]);
+      byte cols[] = {0, 4, 8, 12};
+#if defined(DEBUG)
+      Serial.print("SCR_OPS ");
+      Serial.println(text);
+#endif
+      lcd.clear();
+      lcdBigPrint(text, cols, LCD_NUM);
+    }
+    //if (snsReport[idxReport][1] + SNS_INTERVAL < millis()) {
+    //  snsClear(sensor);
+    //}
+    return true;
   }
+
   return false;
 }
 
@@ -725,16 +739,16 @@ int lcdShowScreen(int index) {
       result = lcdShowHmdt();
       break;
     case SCR_OTP:
-      result = lcdShowSensor("otp");
+      result = lcdShowSensor(SNS_OTP);
       break;
     case SCR_OHM:
-      result = lcdShowSensor("ohm");
+      result = lcdShowSensor(SNS_OHM);
       break;
     case SCR_ODP:
-      result = lcdShowSensor("odp");
+      result = lcdShowSensor(SNS_ODP);
       break;
     case SCR_OPS:
-      result = lcdShowSensor("ops");
+      result = lcdShowSensor(SNS_OPS);
       break;
     case SCR_NOW:
       result = lcdShowWeather(WX_NOW);
@@ -819,7 +833,7 @@ boolean mqttPub(const String &topic, const String &payload) {
 }
 
 /**
-  Publish to topic
+  Publish char array to topic
 */
 boolean mqttPub(const char *payload, const char *lvl1, const char *lvl2 = NULL, const char *lvl3 = NULL, const boolean retain = false) {
   char buf[64];
@@ -837,14 +851,14 @@ boolean mqttPub(const char *payload, const char *lvl1, const char *lvl2 = NULL, 
 }
 
 /**
-  Publish to topic and retain
+  Publish char array to topic and retain
 */
 boolean mqttPubRet(const char *payload, const char *lvl1, const char *lvl2 = NULL, const char *lvl3 = NULL, const boolean retain = true) {
   return mqttPub(payload, lvl1, lvl2, lvl3, retain);
 }
 
 /**
-  Publish to topic
+  Publish integer to topic
 */
 boolean mqttPub(const int payload, const char *lvl1, const char *lvl2 = NULL, const char *lvl3 = NULL, const boolean retain = false) {
   char buf[8];
@@ -853,14 +867,14 @@ boolean mqttPub(const int payload, const char *lvl1, const char *lvl2 = NULL, co
 }
 
 /**
-  Publish to topic and retain
+  Publish integer to topic and retain
 */
 boolean mqttPubRet(const int payload, const char *lvl1, const char *lvl2 = NULL, const char *lvl3 = NULL, const boolean retain = true) {
   return mqttPub(payload, lvl1, lvl2, lvl3, retain);
 }
 
 /**
-  Subscribe to all subtopics in topic or topic/subtopic
+  Subscribe to topic/# or topic/subtopic/#
 */
 void mqttSubscribeAll(const char *lvl1, const char *lvl2 = NULL) {
   char buf[64];
@@ -917,65 +931,45 @@ boolean mqttReconnect() {
   @param payload the message payload (byte array)
   @param length the length of the message payload (unsigned int)
 */
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  // Make a copy
+void mqttCallback(char *topic, byte *payload, unsigned int length) {
+  // Make a limited copy of the payload and make sure it ends with \0
   char message[100];
   if (length > 100) length = 100;
   memcpy(message, payload, length);
   message[length] = '\0';
 
-  // Create string objects
-  String strTopic = String(topic);
-  String strMessage = String(message);
-#ifdef DEBUG
-  Serial.println("MQTT " + strTopic + ": " + strMessage);
-#endif
-
   // Decompose the topic
-  String strRoot, strTrunk, strBranch;
-  int idxSepOne = strTopic.indexOf('/');
-  if (idxSepOne != -1) {
-    strRoot = strTopic.substring(0, idxSepOne);
-#if defined(DEBUG)
-    Serial.println("MQTT_ROOT " + strRoot);
-#endif
-    int idxSepTwo = strTopic.indexOf('/', idxSepOne + 1);
-    if (idxSepTwo != -1) {
-      strTrunk = strTopic.substring(idxSepOne + 1, idxSepTwo);
-#if defined(DEBUG)
-      Serial.println("MQTT_TRNK " + strTrunk);
-#endif
-      strBranch = strTopic.substring(idxSepTwo + 1);
-#if defined(DEBUG)
-      Serial.println("MQTT_BRNC " + strBranch);
+  char *pRoot = NULL, *pTrunk = NULL, *pBranch = NULL;
+  pRoot = topic;
+  pTrunk = strchr(pRoot, '/');
+  if (pTrunk != NULL)
+    *pTrunk++ = '\0';
+  pBranch = strchr(pTrunk, '/');
+  if (pBranch != NULL)
+    *pBranch++ = '\0';
+
+#ifdef DEBUG
+  Serial.printf("MQTT %s: %s\r\n", topic, message);
 #endif
 
-      // Dispatcher
-      if (strRoot == "wx" && strTrunk == wxStation)
-        wxProcess(strBranch.c_str(), strMessage);
-      else if (strRoot == "sensor") {
-        snsProcess(strTopic.substring(idxSepOne + 1), strMessage);
-      }
-      else if (strRoot == "command") {
-        if (strTrunk == "rcs") {
-          rcsProcess(strBranch, strMessage);
-        }
-        else if (strTrunk == nodename) {
-          if (strBranch == "restart") {
-            ESP.restart();
-          }
-          else if (strBranch == "beep") {
-            tone(BEEP_PIN, 2000, 500);
-          }
-          else if (strBranch == "light") {
-            if (strMessage == "on") {
-              lcd.backlight();
-            }
-            else if (strMessage == "off") {
-              lcd.noBacklight();
-            }
-          }
-        }
+  // Dispatcher
+  if (strcmp(pRoot, "wx") == 0 and strcmp(pTrunk, wxStation) == 0)
+    wxProcess(pBranch, message);
+  else if (strcmp(pRoot, "sensor") == 0 and strcmp(pTrunk, "outdoor") == 0)
+    snsProcess(pBranch, message);
+  else if (strcmp(pRoot, "command") == 0) {
+    if (strcmp(pTrunk, "rcs") == 0)
+      rcsProcess(pBranch, message);
+    else if (strcmp(pTrunk, nodename) == 0) {
+      if (strcmp(pBranch, "restart") == 0)
+        ESP.restart();
+      else if (strcmp(pBranch, "beep") == 0)
+        tone(BEEP_PIN, 2000, 500);
+      else if (strcmp(pBranch, "light") == 0) {
+        if (strcmp(message, "on") == 0)
+          lcd.backlight();
+        else if (strcmp(message, "off") == 0)
+          lcd.noBacklight();
       }
     }
   }
@@ -984,28 +978,34 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 /**
   Process the MQTT weather topics and messages and create weather reports
 
-  @param strBranch the MQTT branch topic
-  @param strMessage the MQTT message
+  @param report the weather report topic
+  @param message the weather message
 */
-void wxProcess(const char *branch, String strMessage) {
+void wxProcess(const char *report, char *message) {
   // Find the report index starting from the key
   int idxReport = 0;
-  while (idxReport < WX_ALL) {
-    if (strcmp(branch, wxRepKeys[idxReport]) == 0)
+  while (idxReport < WX_ALL)
+    // FIXME
+    if (strcmp(report, wxRepKeys[idxReport++]) == 0) {
       break;
-    idxReport++;
-  };
+      //idxReport++;
+    }
   // Check if the index has been found
+  idxReport--;
   if (idxReport >= 0 and idxReport < WX_ALL) {
     // Convert from UTF-8 or CP1252 to LCD charset
-    strMessage.replace(strUtfDeg, strLcdDeg);
-    strMessage.replace(strWinDeg, strLcdDeg);
+    strrpl(message, chrUtfDeg, chrLcdDeg);
+    strrpl(message, chrWinDeg, chrLcdDeg);
     // Check the line separator
-    int idxLnSep = strMessage.indexOf(strLnSep);
-    if (idxLnSep != -1) {
+    char *sep = strstr(message, ", ");
+    if (sep != NULL) {
+      // Put \0 in the place of separator
+      *sep = 0;
       // Store the two-line report
-      wxReport[idxReport][0] = strMessage.substring(0, idxLnSep);
-      wxReport[idxReport][1] = strMessage.substring(idxLnSep + 2);
+      strncpy(wxReport[idxReport][0], message, LCD_COLS);
+      wxReport[idxReport][0][LCD_COLS] = '\0';
+      strncpy(wxReport[idxReport][1], sep + 2, LCD_COLS);
+      wxReport[idxReport][1][LCD_COLS] = '\0';
       // The 'tod' and 'ton' reports are mutually exclusive
       if      (idxReport == WX_TOD) wxClear(WX_TON);
       else if (idxReport == WX_TON) wxClear(WX_TOD);
@@ -1021,8 +1021,8 @@ void wxProcess(const char *branch, String strMessage) {
 void wxClear(int idxReport) {
   // Check if the index is valid
   if (idxReport >= 0 and idxReport < WX_ALL) {
-    wxReport[idxReport][0] = "";
-    wxReport[idxReport][1] = "";
+    wxReport[idxReport][0][0] = '\0';
+    wxReport[idxReport][1][0] = '\0';
   }
 }
 
@@ -1032,87 +1032,42 @@ void wxClear(int idxReport) {
   @param strSensor the sensor name
   @param strMessage the sensor value
 */
-void snsProcess(String strSensor, String strMessage) {
-  if      (strSensor == "outdoor/temperature") {
-    snsUpdate("otp", strMessage);
-  }
-  else if (strSensor == "outdoor/humidity") {
-    snsUpdate("ohm", strMessage);
-  }
-  else if (strSensor == "outdoor/dewpoint") {
-    snsUpdate("odp", strMessage);
-  }
-  else if (strSensor == "outdoor/pressure") {
-    snsUpdate("ops", strMessage);
-  }
-}
-/**
-  Update a sensor
+void snsProcess(const char *sensor, char *message) {
+  int idxReport;
+  if      (strcmp(sensor, "temperature") == 0)
+    idxReport = SNS_OTP;
+  else if (strcmp(sensor, "humidity") == 0)
+    idxReport = SNS_OHM;
+  else if (strcmp(sensor, "dewpoint") == 0)
+    idxReport = SNS_ODP;
+  else if (strcmp(sensor, "sealevel") == 0)
+    idxReport = SNS_OPS;
 
-  @param snsName the sensor name
-  @param strMessage the sensor value
-*/
-void snsUpdate(String snsName, String strMessage) {
-  if (snsName != "") {
-    // Check the report index
-    int idxReport = strSensors.indexOf(snsName + " ");
-    if (idxReport != -1) {
-      idxReport /= 4;
-      snsReport[idxReport][0] = strMessage.toInt();
-      snsReport[idxReport][1] = millis() / 1000;
-#if defined(DEBUG)
-      Serial.println("SNS_NAM " + snsName);
-      Serial.println("SNS_VAL " + String(snsReport[idxReport][0]));
-#endif
-    }
-  }
+  snsReport[idxReport][0] = atoi(message);
+  snsReport[idxReport][1] = millis() / 1000;
 }
 
-/**
-  Clear a sensor
-
-  @param sensor the sensor to be clean
-*/
-void snsClear(String snsName) {
-  int idxReport = strSensors.indexOf(snsName + " ");
-  if (idxReport != -1) {
-    idxReport /= 4;
-    snsReport[idxReport][0] = 0;
-    snsReport[idxReport][1] = 0;
-  }
-}
-
-// TODO use and array
-void rcsProcess(String strBranch, String strMessage) {
+void rcsProcess(const char *button, char *message) {
+  char command[][6] = {"10000", "01000", "00100", "00010", "00001"};
+  char btn = toupper((unsigned char) button[0]);
   // Uppercase
-  strBranch.toUpperCase();
-  strMessage.toUpperCase();
-  String rcsButtonCode = "00000";
-
-  switch (strBranch.charAt(0)) {
-    case 'A':
-      rcsButtonCode = "10000"; break;
-    case 'B':
-      rcsButtonCode = "01000"; break;
-    case 'C':
-      rcsButtonCode = "00100"; break;
-    case 'D':
-      rcsButtonCode = "00010"; break;
-    case 'E':
-      rcsButtonCode = "00001"; break;
-    case 'Z':
-      rcsButtonCode = "11111"; break;
+  while (*message) {
+    *message = toupper((unsigned char) * message);
+    message++;
   }
 
-  if (strMessage == "ON") {
-    rcs.switchOn(rcsHomeCode, rcsButtonCode.c_str());
-    //Serial.print(strBranch);
-    //Serial.println("ON");
-  }
-  else if (strMessage == "OFF") {
-    rcs.switchOff(rcsHomeCode, rcsButtonCode.c_str());
-    //Serial.print(strBranch);
-    //Serial.println("OFF");
+  // Valid buttons are A..E
+  if (btn >= 'A' and btn <= 'E') {
+    if (strncmp(message, "ON", 2) == 0) {
+      rcs.switchOn(rcsHomeCode, command[btn - 'A']);
+      //Serial.print(strBranch);
+      //Serial.println("ON");
+    }
+    else if (strncmp(message, "OFF", 3) == 0) {
+      rcs.switchOff(rcsHomeCode, command[btn - 'A']);
+      //Serial.print(btn);
+      //Serial.println("OFF");
+    }
   }
 }
 
@@ -1153,7 +1108,7 @@ void pirInterrupt() {
 /**
   Feedback notification when SoftAP is started
 */
-void wifiCallback (WiFiManager * wifiMgr) {
+void wifiCallback (WiFiManager *wifiMgr) {
   String strMsg = "Connect to ";
   strMsg += wifiMgr->getConfigPortalSSID();
   Serial.println(strMsg);
@@ -1190,34 +1145,42 @@ void setup() {
   // Connected
   lcdShowWiFi(true);
 
-  // OTA
-
-  // Port defaults to 8266
-  // ArduinoOTA.setPort(8266);
-
-  // Hostname defaults to esp8266-[ChipID]
-  // ArduinoOTA.setHostname("myesp8266");
-
-  // No authentication by default
+  // OTA Update
+  ArduinoOTA.setPort(8266);
+  ArduinoOTA.setHostname(NODENAME);
   // ArduinoOTA.setPassword((const char *)"123");
 
   ArduinoOTA.onStart([]() {
-    Serial.println("Start");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("OTA");
+    Serial.println(F("OTA Start"));
   });
+
   ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
+    Serial.println("\nOTA Finished");
   });
+
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    lcd.setCursor(0, 1);
+    lcd.print(progress);
     Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
   });
+
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    if (error == OTA_AUTH_ERROR)
+      Serial.println(F("Auth Failed"));
+    else if (error == OTA_BEGIN_ERROR)
+      Serial.println(F("Begin Failed"));
+    else if (error == OTA_CONNECT_ERROR)
+      Serial.println(F("Connect Failed"));
+    else if (error == OTA_RECEIVE_ERROR)
+      Serial.println(F("Receive Failed"));
+    else if (error == OTA_END_ERROR)
+      Serial.println(F("End Failed"));
   });
+
   ArduinoOTA.begin();
   Serial.println(F("OTA Ready"));
 
@@ -1246,6 +1209,7 @@ void setup() {
 void loop() {
   // OTA
   ArduinoOTA.handle();
+  yield();
 
   // Process incoming MQTT messages and maintain connection
   if (!mqttClient.loop()) {
