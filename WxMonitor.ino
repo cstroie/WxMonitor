@@ -966,8 +966,11 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
       else if (strcmp(pBranch, "beep") == 0)
         tone(BEEP_PIN, 2000, 500);
       else if (strcmp(pBranch, "light") == 0) {
-        if (strcmp(message, "on") == 0)
+        if (strcmp(message, "on") == 0) {
           lcd.backlight();
+          // Re-start the timer to disable the backlight
+          delayPIR.start(PIR_INTERVAL, AsyncDelay::MILLIS);
+        }
         else if (strcmp(message, "off") == 0)
           lcd.noBacklight();
       }
