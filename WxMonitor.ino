@@ -46,8 +46,8 @@
 // MQTT
 #include <PubSubClient.h>
 
-// DHT
-#include "DHT.h"
+// DHT11 sensor
+#include <SimpleDHT.h>
 
 // RC Switch
 #include <RCSwitch.h>
@@ -69,15 +69,20 @@ hd44780_I2Cexp        lcd;      // auto locate and autoconfig interface pins
 #define HD44780_LCDOBJECT       // tell the hd44780 sketch the lcd object has been declared
 const int LCD_COLS = 20;
 const int LCD_ROWS = 4;
-const int PIR_PIN = D5;
 const int LCD_INTERVAL = 4 * 1000;
-const int PIR_INTERVAL = 300 * 1000;
 enum LCD_SCREENS {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON, SCR_ALL};
 enum LCD_CHARS {LCD_LOGO, LCD_NUM, LCD_MOON, LCD_ALL};
 
+// PIR
+const int pinPIR = D5;
+const int PIR_INTERVAL = 300 * 1000;
+
 AsyncDelay delayLCD;
 AsyncDelay delayPIR;
+
+// Global LCD screen index
 int lcdIndex = 0;
+// Global LCD custom characters type
 int lcdChars;
 
 // Array of 8 logo characters defined column-wise
@@ -143,14 +148,15 @@ WiFiClient WiFi_Client;
 PubSubClient mqttClient(WiFi_Client);
 AsyncDelay delayMQTT;
 
-// DHT
-const int DHT_TYPE      = DHT11;
-const int DHT_PIN       = D4;
-const int DHT_INTERVAL  = 60 * 1000;
-DHT dht(DHT_PIN, DHT_TYPE);
-float dhtTemp, dhtHmdt;
-bool dhtValid = false;
-AsyncDelay delayDHT;
+// DHT11
+SimpleDHT11         dht;                    // The DHT11 temperature/humidity sensor
+const int           pinDHT      = D4;       // Temperature/humidity sensor input pin
+const unsigned long snsDelay    = 60000UL;  // Delay between sensor readings
+unsigned long       snsNextTime = 0UL;      // Next time to read the sensors
+int                 dhtTemp     = 0;        // DHT11 temperature (global)
+int                 dhtHmdt     = 0;        // DHT11 humidity (global)
+bool                dhtOK       = false;    // The temperature/humidity sensor presence flag
+bool                dhtDrop     = true;     // Always drop the first reading
 
 // RC Switch
 const int RCS_PIN = D3;
@@ -499,10 +505,10 @@ bool lcdShowTime() {
   LCD Display the sensor temperature with big characters
 */
 bool lcdShowTemp() {
-  if (dhtValid) {
+  if (dhtOK) {
     char buf[8] = "";
     // Create the formatted time
-    snprintf_P(buf, sizeof(buf), PSTR("% d'C"), (int)dhtTemp);
+    snprintf_P(buf, sizeof(buf), PSTR("% d'C"), dhtTemp);
     // Define the columns
     byte cols[] = {4, 8, 2, 15, 17};
 #if defined(DEBUG)
@@ -512,17 +518,17 @@ bool lcdShowTemp() {
     lcd.clear();
     lcdBigPrint(buf, cols, 1, LCD_NUM);
   }
-  return dhtValid;
+  return dhtOK;
 }
 
 /**
   LCD Display the sensor humidity with big characters
 */
 bool lcdShowHmdt() {
-  if (dhtValid) {
+  if (dhtOK) {
     char buf[8] = "";
     // Create the formatted time
-    snprintf_P(buf, sizeof(buf), PSTR("% d%%"), (int)dhtHmdt);
+    snprintf_P(buf, sizeof(buf), PSTR("% d%%"), dhtHmdt);
     // Define the columns
     byte cols[] = {4, 8, 12, 16};
 #if defined(DEBUG)
@@ -532,7 +538,7 @@ bool lcdShowHmdt() {
     lcd.clear();
     lcdBigPrint(buf, cols, 1, LCD_NUM);
   }
-  return dhtValid;
+  return dhtOK;
 }
 
 /**
@@ -1062,21 +1068,28 @@ void rcsProcess(const char *button, char *message) {
 }
 
 /**
-  Read the DHT sensor and store the data in two globals: dhtTemp and dhtHmdt
+  Read the DHT11 sensor
 
-  @return boolean reading success
+  @param temp temperature
+  @param hmdt humidity
+  @param drop drop the reading (read twice)
+  @return success
 */
-bool dhtRead() {
-  dhtTemp = dht.readTemperature();
-  dhtHmdt = dht.readHumidity();
-  // Check if any reads failed
-  if (isnan(dhtHmdt) || isnan(dhtTemp)) {
-    dhtValid = false;
-    Serial.println(F("Failed to read from DHT sensor!"));
+bool dhtRead(int *temp, int *hmdt, bool drop = false) {
+  byte t = 0, h = 0;
+  bool ok = false;
+  if (drop)
+    // First read
+    ok = dht.read(pinDHT, NULL, NULL, NULL);
+  else {
+    // Second read
+    if (dht.read(pinDHT, &t, &h, NULL) == 0) {
+      if (temp) *temp = (int)t;
+      if (hmdt) *hmdt = (int)h;
+      ok = true;
+    }
   }
-  else
-    dhtValid = true;
-  return dhtValid;
+  return ok;
 }
 
 /**
@@ -1183,16 +1196,21 @@ void setup() {
   delayMQTT.start(mqttDelay, AsyncDelay::MILLIS);
   yield();
 
-  // DHT timer
-  delayDHT.start(DHT_INTERVAL, AsyncDelay::MILLIS);
+  // DHT11
+  dhtOK = dht.read(pinDHT, NULL, NULL, NULL) == 0;
+  if (dhtOK) Serial.println(F("DHT11 sensor detected"));
+  else       Serial.println(F("DHT11 sensor missing"));
 
   // Finally, start the LCD and PIR timers
   delayLCD.start(LCD_INTERVAL, AsyncDelay::MILLIS);
   delayPIR.start(PIR_INTERVAL, AsyncDelay::MILLIS);
 
   // PIR pin and interrupt
-  pinMode(PIR_PIN, INPUT);
-  attachInterrupt(PIR_PIN, pirInterrupt, FALLING);
+  pinMode(pinPIR, INPUT);
+  attachInterrupt(pinPIR, pirInterrupt, FALLING);
+
+  // Start the sensors timer
+  snsNextTime = millis();
 }
 
 void loop() {
@@ -1220,21 +1238,36 @@ void loop() {
   if (delayPIR.isExpired()) {
     lcd.noBacklight();
   }
-  // Read the sensors and publish telemetry
-  if (delayDHT.isExpired()) {
-    dhtRead();
-    // Publish DHT data
-    if (dhtValid) {
-      char text[8] = "";
-      sprintf(text, "%d", (int)dhtTemp);
-      mqttPub(text, mqttTopicSns, "indoor", "temperature");
-      sprintf(text, "%d", (int)dhtHmdt);
-      mqttPub(text, mqttTopicSns, "indoor", "humidity");
-    };
+
+  // Read the sensors and publish the telemetry
+  if (millis() >= snsNextTime) {
+    if (dhtDrop) {
+      // Drop this reading, but check the result
+      if (dhtRead(&dhtTemp, &dhtHmdt, true)) {
+        // Don't drop the next one
+        dhtDrop = false;
+        // Try again after 2 seconds
+        snsNextTime += 2000UL;
+      }
+    }
+    else {
+      // Get the temperature and humidity
+      if (dhtRead(&dhtTemp, &dhtHmdt, false)) {
+        // Drop the next reading, again
+        dhtDrop = false;
+        // Compose and publish the telemetry
+        char text[8] = "";
+        snprintf_P(text, sizeof(text), PSTR("%d"), dhtTemp);
+        mqttPub(text, mqttTopicSns, "indoor", "temperature");
+        snprintf_P(text, sizeof(text), PSTR("%d"), dhtHmdt);
+        mqttPub(text, mqttTopicSns, "indoor", "humidity");
+      }
+    }
 
     // Publish the connection report
     char topic[32], buf[16];
     // Create the topic
+    // TODO strcat_P
     strcpy(topic, mqttTopicRpt);
     strcat(topic, "/");
     strcat(topic, nodename);
@@ -1246,11 +1279,9 @@ void loop() {
     snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getVcc());
     mqttPubRet(buf, topic, "vcc");
     // Add the WiFi topic
-    strcat(topic, "/");
-    strcat(topic, "wifi");
+    strcat_P(topic, PSTR("/wifi"));
     mqttPubRet(WiFi.RSSI(), topic, "rssi");
-
-    // Repeat
-    delayDHT.repeat();
   }
+  // Try again after the delay
+  snsNextTime += snsDelay - 2000UL;
 }
