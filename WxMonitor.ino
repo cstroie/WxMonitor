@@ -73,17 +73,14 @@ const int LCD_INTERVAL = 4 * 1000;
 enum LCD_SCREENS {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON, SCR_ALL};
 enum LCD_CHARS {LCD_LOGO, LCD_NUM, LCD_MOON, LCD_ALL};
 
-// PIR
-const int pinPIR = D5;
-const int PIR_INTERVAL = 300 * 1000;
 
 AsyncDelay delayLCD;
-AsyncDelay delayPIR;
 
 // Global LCD screen index
 int lcdIndex = 0;
 // Global LCD custom characters type
 int lcdChars;
+bool lcdLight = true;         // Global flag to keep track of LCD backlight status
 
 // Array of 8 logo characters defined column-wise
 const uint8_t LCD_BGLOGO[8 * 8] PROGMEM = {
@@ -109,14 +106,14 @@ const uint8_t LCD_BGNUM_SHAPES[8 * 8] PROGMEM = {
   B00000, B11111, B11111, B00000, B11111, B00000, B00000, B00000,
 };
 
-// Time synchronization and keeping
+// Time synchronization and time keeping
+WiFiUDP       ntpClient;                                      // NTP UDP client
 const char    ntpServer[] PROGMEM   = "europe.pool.ntp.org";  // NTP server to connect to (RFC5905)
 const int     ntpPort               = 123;                    // NTP port
 unsigned long ntpNextSync           = 0UL;                    // Next time to syncronize
 unsigned long ntpDelta              = 0UL;                    // Difference between real time and internal clock
 bool          ntpOk                 = false;                  // Flag to know the time is accurate
 const int     ntpTZ                 = 3;                      // Time zone
-WiFiUDP       ntpClient;                                      // NTP UDP client
 
 // Wx
 const char wxStation[] = "ROXX0003";
@@ -149,30 +146,39 @@ PubSubClient mqttClient(WiFi_Client);
 AsyncDelay delayMQTT;
 
 // DHT11
-SimpleDHT11         dht;                    // The DHT11 temperature/humidity sensor
-const int           pinDHT      = D4;       // Temperature/humidity sensor input pin
-const unsigned long snsDelay    = 60000UL;  // Delay between sensor readings
-unsigned long       snsNextTime = 0UL;      // Next time to read the sensors
-int                 dhtTemp     = 0;        // DHT11 temperature (global)
-int                 dhtHmdt     = 0;        // DHT11 humidity (global)
-bool                dhtOK       = false;    // The temperature/humidity sensor presence flag
-bool                dhtDrop     = true;     // Always drop the first reading
+SimpleDHT11         dht;                          // The DHT11 temperature/humidity sensor
+int                 dhtTemp       = 0;            // DHT11 temperature (global)
+int                 dhtHmdt       = 0;            // DHT11 humidity (global)
+bool                dhtOK         = false;        // The temperature/humidity sensor presence flag
+bool                dhtDrop       = true;         // Always drop the first reading
+const unsigned long snsDelay      = 60000UL;      // Delay between sensor readings
+unsigned long       snsNextTime   = 0UL;          // Next time to read the sensors
+const int           pinDHT        = D4;           // Temperature/humidity sensor input pin
+// Set ADC to Voltage
+ADC_MODE(ADC_VCC);
 
 // RC Switch
-const int RCS_PIN = D3;
-const char rcsHomeCode[] = "11111";
-RCSwitch rcs = RCSwitch();
+RCSwitch            rcs           = RCSwitch();   // Radio Command
+const int           pinRCS        = D3;           // RCS output pin
+const char          rcsHomeCode[] = "11111";      // The HOME code of your RC remote/receivers
 
 // Beep
-const int BEEP_PIN = D10;
+const int           pinBeep       = D10;          // Beep output pin
 
-// Voltage
-ADC_MODE(ADC_VCC);
+// PIR
+const unsigned long pirDelay      = 300000UL;     // Delay after that the light is closed
+unsigned long       pirNextTime   = 0UL;          // Next time to close the light
+const int           pinPIR        = D5;
+
 
 // Character transformation
 const char chrUtfDeg[] = {194, 176, 0};
 const char chrWinDeg[] = {176, 0};
 const char chrLcdDeg[] = {223, 0};
+
+
+
+
 
 /**
   Replace a substring
@@ -966,15 +972,19 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
       if (strcmp(pBranch, "restart") == 0)
         ESP.restart();
       else if (strcmp(pBranch, "beep") == 0)
-        tone(BEEP_PIN, 2000, 500);
+        // Just beep
+        tone(pinBeep, 2000, 250);
       else if (strcmp(pBranch, "light") == 0) {
         if (strcmp(message, "on") == 0) {
+          // Lights on
           lcd.backlight();
-          // Re-start the timer to disable the backlight
-          delayPIR.start(PIR_INTERVAL, AsyncDelay::MILLIS);
+          lcdLight = true;
+          // Set again the timer to disable the backlight
+          pirNextTime = millis() + pirDelay;
         }
         else if (strcmp(message, "off") == 0)
-          lcd.noBacklight();
+          // Expire the timer
+          pirNextTime = millis();
       }
     }
   }
@@ -1097,13 +1107,15 @@ bool dhtRead(int *temp, int *hmdt, bool drop = false) {
 */
 void pirInterrupt() {
   // Do not reset the screens on subsequent movements
-  if (delayPIR.isExpired()) {
+  if (millis() >= pirNextTime) {
     lcd.backlight();
+    lcdLight = true;
     lcdIndex = 0;
     lcdRotateScreens();
+    // TODO MQTT motion detection
   }
-  // Re-start the timer to disable the backlight
-  delayPIR.start(PIR_INTERVAL, AsyncDelay::MILLIS);
+  // Set again the timer to disable the backlight
+  pirNextTime = millis() + pirDelay;
   //Serial.println("Motion detected");
 }
 
@@ -1126,8 +1138,8 @@ void setup() {
   Serial.print(F(" "));
   Serial.println(__DATE__);
 
-  // RCS
-  rcs.enableTransmit(RCS_PIN);
+  // Configure the RCS pin
+  rcs.enableTransmit(pinRCS);
 
   // LCD init
   lcdInit();
@@ -1201,13 +1213,15 @@ void setup() {
   if (dhtOK) Serial.println(F("DHT11 sensor detected"));
   else       Serial.println(F("DHT11 sensor missing"));
 
-  // Finally, start the LCD and PIR timers
+  // Finally, start the LCD timer
   delayLCD.start(LCD_INTERVAL, AsyncDelay::MILLIS);
-  delayPIR.start(PIR_INTERVAL, AsyncDelay::MILLIS);
 
   // PIR pin and interrupt
   pinMode(pinPIR, INPUT);
   attachInterrupt(pinPIR, pirInterrupt, FALLING);
+  lcdLight = true;
+  // Set the timer to disable the backlight
+  pirNextTime = millis() + pirDelay;
 
   // Start the sensors timer
   snsNextTime = millis();
@@ -1233,10 +1247,11 @@ void loop() {
     lcdRotateScreens();
     delayLCD.repeat();
   }
+
   // Check if motion detection has expired
-  // FIXME runs  on every loop
-  if (delayPIR.isExpired()) {
+  if (millis() >= pirNextTime and lcdLight) {
     lcd.noBacklight();
+    lcdLight = false;
   }
 
   // Read the sensors and publish the telemetry
