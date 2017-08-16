@@ -1,5 +1,5 @@
 /**
-  WxMon - Weather Monitor
+  WxMonitor - Weather Monitor
 
   Copyright 2017 Costin STROIE <costinstroie@eridu.eu.org>
 
@@ -128,22 +128,22 @@ const int SNS_INTERVAL = 600 * 1000;
 
 // MQTT parameters
 // TODO FPSTR()
+WiFiClient WiFi_Client;                                       // WiFi TCP client for MQTT
+PubSubClient mqttClient(WiFi_Client);                         // MQTT client, based on WiFi client
 #ifdef DEBUG
-const char mqttId[]       = "devnode-eridu-eu-org";
+const char          mqttId[]       = "devnode-eridu-eu-org";  // Development MQTT client ID
 #else
-const char mqttId[]       = "wxmon-eridu-eu-org";
+const char          mqttId[]       = "wxmon-eridu-eu-org";    // Production MQTT client ID
 #endif
-const char mqttServer[]   = "eridu.eu.org";
-const int  mqttPort       = 1883;
-const int  mqttDelay      = 5000;
-const char mqttTopicWx[]  = "wx";
-const char mqttTopicCmd[] = "command";
-const char mqttTopicSns[] = "sensor";
-const char mqttTopicRpt[] = "report";
-
-WiFiClient WiFi_Client;
-PubSubClient mqttClient(WiFi_Client);
-AsyncDelay delayMQTT;
+const char          mqttServer[]   = "eridu.eu.org";          // MQTT server address to connect to
+const int           mqttPort       = 1883;                    // MQTT port
+const unsigned long mqttDelay      = 5000UL;                  // Delay between reconnection attempts
+unsigned long       mqttNextTime   = 0UL;                     // Next time to reconnect
+// Various MQTT topics
+const char          mqttTopicWx[]  = "wx";
+const char          mqttTopicCmd[] = "command";
+const char          mqttTopicSns[] = "sensor";
+const char          mqttTopicRpt[] = "report";
 
 // DHT11
 SimpleDHT11         dht;                          // The DHT11 temperature/humidity sensor
@@ -818,7 +818,8 @@ void lcdRotateScreens() {
   } while (nextIndex <= 0);
 }
 
-/** MQTT publishing wrapper, using strings, with retain flag on
+/**
+  MQTT publishing wrapper, using strings, with retain flag on
 
   @param topic the MQTT topic
   @param payload the MQTT message to send to topic
@@ -829,7 +830,8 @@ boolean mqttPubRetain(const String &topic, const String &payload) {
   return mqttClient.publish(topic.c_str(), payload.c_str(), true);
 }
 
-/** MQTT publishing wrapper, using strings
+/**
+  MQTT publishing wrapper, using strings
 
   @param topic the MQTT topic
   @param payload the MQTT message to send to topic
@@ -1205,7 +1207,7 @@ void setup() {
   // Start the MQTT client
   mqttClient.setServer(mqttServer, mqttPort);
   mqttClient.setCallback(mqttCallback);
-  delayMQTT.start(mqttDelay, AsyncDelay::MILLIS);
+  mqttNextTime = millis();
   yield();
 
   // DHT11
@@ -1233,13 +1235,11 @@ void loop() {
   yield();
 
   // Process incoming MQTT messages and maintain connection
-  if (!mqttClient.loop()) {
-    // Not connected, try to reconnect every mqttDelay seconds
-    if (delayMQTT.isExpired()) {
-      mqttReconnect();
-      delayMQTT.repeat();
-    }
-  }
+  if (!mqttClient.loop())
+    // Not connected, check if it's time to reconnect
+    if (millis() >= mqttNextTime)
+      // Try to reconnect every mqttDelay seconds
+      if (!mqttReconnect()) mqttNextTime = millis() + mqttDelay;
   yield();
 
   // Rotate the LCD screens
