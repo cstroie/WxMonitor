@@ -1101,6 +1101,9 @@ bool dhtRead(int *temp, int *hmdt, bool drop = false) {
       ok = true;
     }
   }
+#ifdef DEBUG
+  if (!ok) Serial.println(F("Failed to read the DHT11 sensor"));
+#endif
   return ok;
 }
 
@@ -1257,19 +1260,18 @@ void loop() {
   // Read the sensors and publish the telemetry
   if (millis() >= snsNextTime) {
     if (dhtDrop) {
-      // Drop this reading, but check the result
-      if (dhtRead(&dhtTemp, &dhtHmdt, true)) {
-        // Don't drop the next one
-        dhtDrop = false;
-        // Try again after 2 seconds
-        snsNextTime += 2000UL;
-      }
+      // Drop this reading
+      dhtRead(&dhtTemp, &dhtHmdt, true);
+      // Don't drop the next one
+      dhtDrop = false;
+      // Try again after 2 seconds
+      snsNextTime += 2000UL;
     }
     else {
+      // Drop the next reading, again
+      dhtDrop = true;
       // Get the temperature and humidity
       if (dhtRead(&dhtTemp, &dhtHmdt, false)) {
-        // Drop the next reading, again
-        dhtDrop = false;
         // Compose and publish the telemetry
         char text[8] = "";
         snprintf_P(text, sizeof(text), PSTR("%d"), dhtTemp);
@@ -1277,26 +1279,26 @@ void loop() {
         snprintf_P(text, sizeof(text), PSTR("%d"), dhtHmdt);
         mqttPub(text, mqttTopicSns, "indoor", "humidity");
       }
-    }
 
-    // Publish the connection report
-    char topic[32], buf[16];
-    // Create the topic
-    // TODO strcat_P
-    strcpy(topic, mqttTopicRpt);
-    strcat(topic, "/");
-    strcat(topic, nodename);
-    // Create and publish the reports
-    snprintf_P(buf, sizeof(buf), PSTR("%d"), millis() / 1000);
-    mqttPubRet(buf, topic, "uptime");
-    snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getFreeHeap());
-    mqttPubRet(buf, topic, "heap");
-    snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getVcc());
-    mqttPubRet(buf, topic, "vcc");
-    // Add the WiFi topic
-    strcat_P(topic, PSTR("/wifi"));
-    mqttPubRet(WiFi.RSSI(), topic, "rssi");
+      // Publish the connection report
+      char topic[32], buf[16];
+      // Create the topic
+      // TODO strcat_P
+      strcpy(topic, mqttTopicRpt);
+      strcat(topic, "/");
+      strcat(topic, nodename);
+      // Create and publish the reports
+      snprintf_P(buf, sizeof(buf), PSTR("%d"), millis() / 1000);
+      mqttPubRet(buf, topic, "uptime");
+      snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getFreeHeap());
+      mqttPubRet(buf, topic, "heap");
+      snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getVcc());
+      mqttPubRet(buf, topic, "vcc");
+      // Add the WiFi topic
+      strcat_P(topic, PSTR("/wifi"));
+      mqttPubRet(WiFi.RSSI(), topic, "rssi");
+    }
+    // Try again after the delay
+    snsNextTime += snsDelay - 2000UL;
   }
-  // Try again after the delay
-  snsNextTime += snsDelay - 2000UL;
 }
