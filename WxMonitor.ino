@@ -71,7 +71,7 @@ const int LCD_COLS = 20;
 const int LCD_ROWS = 4;
 const int LCD_INTERVAL = 4 * 1000;
 enum LCD_SCREENS {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON, SCR_ALL};
-enum LCD_CHARS {LCD_LOGO, LCD_NUM, LCD_MOON, LCD_ALL};
+enum LCD_CHARS {LCD_LOGO, LCD_BGNUM, LCD_LGNUM, LCD_MOON, LCD_ALL};
 
 
 AsyncDelay delayLCD;
@@ -104,6 +104,18 @@ const uint8_t LCD_BGNUM_SHAPES[8 * 8] PROGMEM = {
   B00000, B11111, B00000, B00000, B00000, B00001, B10000, B00000,
   B00000, B11111, B11111, B00000, B11111, B00000, B00000, B00000,
   B00000, B11111, B11111, B00000, B11111, B00000, B00000, B00000,
+};
+
+// Array of 8 characters defined column-wise
+const uint8_t LCD_LGNUM_SHAPES[8 * 8] PROGMEM = {
+  B11111, B00000, B00000, B00000, B11111, B11111, B00011, B00000,
+  B11111, B00000, B00000, B00000, B01111, B11110, B01111, B00000,
+  B11111, B00000, B00000, B00000, B01111, B11110, B01111, B01110,
+  B11111, B00000, B00000, B00000, B00011, B11000, B11111, B11111,
+  B00000, B11111, B00011, B11000, B00000, B00000, B11111, B11111,
+  B00000, B11111, B01111, B11110, B00000, B00000, B11110, B01110,
+  B00000, B11111, B01111, B11110, B00000, B00000, B11110, B00000,
+  B00000, B11111, B11111, B11111, B00000, B00000, B11000, B00000,
 };
 
 // Time synchronization and time keeping
@@ -335,8 +347,12 @@ void lcdDefChars(int lcdCharsType) {
       lcdDefBig(LCD_BGLOGO);
       lcdChars = lcdCharsType;
       break;
-    case LCD_NUM:
+    case LCD_BGNUM:
       lcdDefBig(LCD_BGNUM_SHAPES);
+      lcdChars = lcdCharsType;
+      break;
+    case LCD_LGNUM:
+      lcdDefBig(LCD_LGNUM_SHAPES);
       lcdChars = lcdCharsType;
       break;
   }
@@ -353,6 +369,19 @@ void lcdDefChars(int lcdCharsType) {
 byte copyArray(byte *dst, byte *src, byte len) {
   memcpy(dst, src, len);
   return len >> 1;
+}
+
+/**
+  Copy the source shape to destination shape and return the length divided by 4
+
+  @param dst the destination array
+  @param src the source array
+  @param len the length of the source array
+  @return the number of columns (half the length of the source array)
+*/
+byte copyLgShape(byte *dst, byte *src, byte len) {
+  memcpy(dst, src, len);
+  return len >> 2;
 }
 
 /**
@@ -455,6 +484,111 @@ byte lcdBigConstruct(char chr, byte *charShapes, size_t len) {
 }
 
 /**
+  LCD Construct the large characters (on 4 lines)
+
+  @param chr the character to define
+  @param charShapes array of needed character shapes
+  @return the number of display columns the character uses
+*/
+byte lcdLgConstruct(char chr, byte *charShapes, size_t len) {
+  byte charCols = 0;
+  switch (chr) {
+    case '0': {
+        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '1': {
+        byte tmpShapes[] = {0x01, 0x03, 0x20,  0x20, 0xff, 0x20,  0x20, 0xff, 0x20,  0x00, 0x00, 0x00};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '2': {
+        byte tmpShapes[] = {0x02, 0x01, 0x03,  0x02, 0x01, 0xff,  0xff, 0x20, 0x20,  0x04, 0x00, 0x00};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '3': {
+        byte tmpShapes[] = {0x02, 0x01, 0x03,  0x20, 0x01, 0xff,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '4': {
+        byte tmpShapes[] = {0x01, 0x20, 0x20,  0xff, 0x01, 0xff,  0x20, 0x20, 0xff,  0x20, 0x20, 0x00};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '5': {
+        byte tmpShapes[] = {0x01, 0x01, 0x01,  0xff, 0x01, 0x03,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '6': {
+        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '7': {
+        byte tmpShapes[] = {0x01, 0x01, 0x01,  0x20, 0x02, 0xff,  0x20, 0xff, 0x20,  0x20, 0x00, 0x20};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '8': {
+        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x01, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '9': {
+        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0xff,  0x20, 0x20, 0x05};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case 'c': {
+        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0x00,  0xff, 0x20, 0x01,  0x04, 0x00, 0x05};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case 'C': {
+        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0x20,  0x04, 0x00, 0x05,  0x20, 0x20, 0x20};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '-': {
+        byte tmpShapes[] = {0x20, 0x20, 0x20,  0x20, 0x02, 0x02,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case ' ': {
+        byte tmpShapes[] = {0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case ':': {
+        byte tmpShapes[] = {0x20,  0x07,  0x07,  0x20};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '.': {
+        byte tmpShapes[] = {0x20,  0x20,  0x20,  0x07};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '\'': {
+        byte tmpShapes[] = {0x07,  0x20,  0x20,  0x20};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+    case '%': {
+        //byte tmpShapes[] = {0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x07, 0x02, 0x05,  0x02, 0x05, 0x07};
+        byte tmpShapes[] = {0x20, 0x20, 0x20,  0x07, 0x20, 0x02,  0x02, 0x06, 0x05,  0x05, 0x20, 0x07};
+        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
+      }
+      break;
+  }
+  return charCols;
+}
+
+/**
   LCD Write one big custom charater (on 2 lines)
 
   @param chr the character to write
@@ -471,16 +605,45 @@ void lcdBigWrite(char chr, byte col, byte row = 0) {
 }
 
 /**
-  LCD Write big custom charaters
+  LCD Write one large custom charater (on 4 lines)
+
+  @param chr the character to write
+  @param col the column to write the character
+*/
+void lcdLgWrite(char chr, byte col, byte row = 0) {
+  byte charShapes[12];
+  byte charCols = lcdLgConstruct(chr, charShapes, sizeof(charShapes));
+  for (byte line = 0; line < 4; line++) {
+    lcd.setCursor(col, line + row);
+    for (byte item = line * charCols; item < charCols * (line + 1); item++)
+      lcd.write(byte(charShapes[item]));
+  }
+}
+
+/**
+  LCD Write big custom charaters (on 2 lines)
 
   @param text the text to write
   @param cols the columns to write each character
   @param type the character type to use
 */
-void lcdBigPrint(const char *text, const byte *cols, byte row = 0, int type = LCD_NUM) {
+void lcdBigPrint(const char *text, const byte *cols, byte row = 0, int type = LCD_BGNUM) {
   if (lcdChars != type) lcdDefChars(type);
   for (int i = 0; i <= sizeof(text); i++)
     lcdBigWrite(text[i], cols[i]);
+}
+
+/**
+  LCD Write large custom charaters (on 4 lines)
+
+  @param text the text to write
+  @param cols the columns to write each character
+  @param type the character type to use
+*/
+void lcdLgPrint(const char *text, const byte *cols, byte row = 0, int type = LCD_LGNUM) {
+  if (lcdChars != type) lcdDefChars(type);
+  for (int i = 0; i <= sizeof(text); i++)
+    lcdLgWrite(text[i], cols[i]);
 }
 
 /**
@@ -497,13 +660,13 @@ bool lcdShowTime() {
   // Create the formatted time
   snprintf_P(buf, sizeof(buf), PSTR("%02d:%02d"), hh, mm);
   // Define the columns
-  byte cols[] = {2, 6, 9, 11, 15};
+  byte cols[] = {2, 6, 10, 12, 16};
 #ifdef DEBUG
   Serial.print(F("SCR_CLK "));
   Serial.println(buf);
 #endif
   lcd.clear();
-  lcdBigPrint(buf, cols, 1, LCD_NUM);
+  lcdLgPrint(buf, cols);
   return true;
 }
 
@@ -516,13 +679,13 @@ bool lcdShowTemp() {
     // Create the formatted time
     snprintf_P(buf, sizeof(buf), PSTR("% d'C"), dhtTemp);
     // Define the columns
-    byte cols[] = {4, 8, 2, 15, 17};
+    byte cols[] = {4, 8, 12, 16, 17};
 #if defined(DEBUG)
     Serial.print("SCR_TEMP ");
     Serial.println(buf);
 #endif
     lcd.clear();
-    lcdBigPrint(buf, cols, 1, LCD_NUM);
+    lcdLgPrint(buf, cols);
   }
   return dhtOK;
 }
@@ -542,7 +705,7 @@ bool lcdShowHmdt() {
     Serial.println(buf);
 #endif
     lcd.clear();
-    lcdBigPrint(buf, cols, 1, LCD_NUM);
+    lcdLgPrint(buf, cols);
   }
   return dhtOK;
 }
@@ -663,43 +826,43 @@ bool lcdShowSensor(int sensor) {
   if (snsReport[sensor][1] > 0) {
     if      (sensor == SNS_OTP) {
       sprintf(text, "% d'C", snsReport[sensor][0]);
-      byte cols[] = {0, 4, 8, 11, 13};
+      byte cols[] = {4, 8, 12, 16, 17}; //{2, 6, 10, 15, 16};
 #if defined(DEBUG)
       Serial.print("SCR_OTP ");
       Serial.println(text);
 #endif
       lcd.clear();
-      lcdBigPrint(text, cols, LCD_NUM);
+      lcdLgPrint(text, cols);
     }
     else if (sensor == SNS_OHM) {
       sprintf(text, "% d%%", snsReport[sensor][0]);
-      byte cols[] = {0, 4, 8, 12};
+      byte cols[] = {4, 8, 12, 16};
 #if defined(DEBUG)
       Serial.print("SCR_OHM ");
       Serial.println(text);
 #endif
       lcd.clear();
-      lcdBigPrint(text, cols, LCD_NUM);
+      lcdLgPrint(text, cols);
     }
     else if (sensor == SNS_ODP) {
       sprintf(text, "% d'C", snsReport[sensor][0]);
-      byte cols[] = {0, 4, 8, 11, 13};
+      byte cols[] = {4, 8, 12, 16, 17};
 #if defined(DEBUG)
       Serial.print("SCR_ODP ");
       Serial.println(text);
 #endif
       lcd.clear();
-      lcdBigPrint(text, cols, LCD_NUM);
+      lcdLgPrint(text, cols);
     }
     else if (sensor == SNS_OPS) {
       sprintf(text, "% d", snsReport[sensor][0]);
-      byte cols[] = {0, 4, 8, 12};
+      byte cols[] = {0, 4, 8, 12, 16};
 #if defined(DEBUG)
       Serial.print("SCR_OPS ");
       Serial.println(text);
 #endif
       lcd.clear();
-      lcdBigPrint(text, cols, LCD_NUM);
+      lcdLgPrint(text, cols);
     }
     //if (snsReport[idxReport][1] + SNS_INTERVAL < millis()) {
     //  snsClear(sensor);
@@ -1047,7 +1210,7 @@ void wxClear(int report) {
   @param strMessage the sensor value
 */
 void snsProcess(const char *sensor, char *message) {
-  int idxReport;
+  int idxReport = -1;
   if      (strcmp(sensor, "temperature") == 0)
     idxReport = SNS_OTP;
   else if (strcmp(sensor, "humidity") == 0)
@@ -1057,8 +1220,10 @@ void snsProcess(const char *sensor, char *message) {
   else if (strcmp(sensor, "sealevel") == 0)
     idxReport = SNS_OPS;
   // Store the sensor data and age
-  snsReport[idxReport][0] = atoi(message);
-  snsReport[idxReport][1] = millis() / 1000;
+  if (idxReport != -1) {
+    snsReport[idxReport][0] = atoi(message);
+    snsReport[idxReport][1] = millis() / 1000;
+  }
 }
 
 void rcsProcess(const char *button, char *message) {
