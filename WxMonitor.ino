@@ -61,7 +61,11 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.2";
+const char VERSION[]  = "3.3";
+
+// OTA
+int otaProgress = 0;
+int otaPort = 8266;
 
 // LCD
 #define WIRECLOCK     400000L   // tell hd44780 to use 400kHz i2c clock rate
@@ -133,11 +137,6 @@ enum WX_REPKEYS {WX_NOW, WX_TOD, WX_TON, WX_TOM, WX_DAT, WX_SUN, WX_MON, WX_BAR,
 char wxRepKeys[][4] = {"now", "tod", "ton", "tom", "dat", "sun", "mon", "bar"};
 char wxReport[WX_ALL][2][LCD_COLS];
 
-// Sensors
-enum SNS_KEYS {SNS_ITP, SNS_IHM, SNS_OTP, SNS_OHM, SNS_ODP, SNS_OPS, SNS_ALL};
-int snsReport[SNS_ALL][2];
-const int SNS_INTERVAL = 600 * 1000;
-
 // MQTT parameters
 // TODO FPSTR()
 WiFiClient WiFi_Client;                                       // WiFi TCP client for MQTT
@@ -159,13 +158,15 @@ const char          mqttTopicRpt[] = "report";
 
 // DHT11
 SimpleDHT11         dht;                          // The DHT11 temperature/humidity sensor
-int                 dhtTemp       = 0;            // DHT11 temperature (global)
-int                 dhtHmdt       = 0;            // DHT11 humidity (global)
 bool                dhtOK         = false;        // The temperature/humidity sensor presence flag
 bool                dhtDrop       = true;         // Always drop the first reading
 const unsigned long snsDelay      = 60000UL;      // Delay between sensor readings
 unsigned long       snsNextTime   = 0UL;          // Next time to read the sensors
 const int           pinDHT        = D4;           // Temperature/humidity sensor input pin
+// Sensors
+enum                SNS_KEYS      {SNS_ITP, SNS_IHM, SNS_OTP, SNS_OHM, SNS_ODP, SNS_OPS, SNS_ALL};
+int                 snsReport[SNS_ALL][2];        // Sensors storage
+const int           snsTTL = 600 * 1000;          // Sensors readings time to live
 // Set ADC to Voltage
 ADC_MODE(ADC_VCC);
 
@@ -175,7 +176,7 @@ const int           pinRCS        = D3;           // RCS output pin
 const char          rcsHomeCode[] = "11111";      // The HOME code of your RC remote/receivers
 
 // Beep
-const int           pinBeep       = D10;          // Beep output pin
+const int           pinBeep       = D6 ;          // Beep output pin
 
 // PIR
 const unsigned long pirDelay      = 300000UL;     // Delay after that the light is closed
@@ -321,9 +322,12 @@ void lcdLogo() {
   byte text[] = {0, 1, 32, 2, 3, 4, 5, 6, 3, 7}; // "Wx Monitor"
   lcdDefChars(LCD_LOGO);
   lcd.clear();
-  lcd.setCursor(5, 1);
+  lcd.setCursor((LCD_COLS - sizeof(text)) / 2, 1);
   for (byte item = 0; item < sizeof(text); item++)
     lcd.write(text[item]);
+  lcd.setCursor(LCD_COLS - strlen(VERSION) - 1, LCD_ROWS - 1);
+  lcd.print("v");
+  lcd.print(VERSION);
 }
 
 /**
@@ -543,18 +547,18 @@ byte lcdLgConstruct(char chr, byte *charShapes, size_t len) {
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case 'c': {
+    case 'C': {
         byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0x00,  0xff, 0x20, 0x01,  0x04, 0x00, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
-    case 'C': {
+    case 'c': {
         byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0x20,  0x04, 0x00, 0x05,  0x20, 0x20, 0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '-': {
-        byte tmpShapes[] = {0x20, 0x20, 0x20,  0x20, 0x02, 0x02,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
+        byte tmpShapes[] = {0x20, 0x20, 0x20,  0x20, 0x01, 0x01,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
@@ -655,7 +659,7 @@ bool lcdShowTime() {
   // Compute hour, minute and second
   int hh = (utm % 86400L) / 3600;
   int mm = (utm % 3600) / 60;
-  int ss =  utm % 60;
+  //int ss =  utm % 60;
   // Create the formatted time
   snprintf_P(buf, sizeof(buf), PSTR("%02d:%02d"), hh, mm);
   // Define the columns
@@ -675,8 +679,8 @@ bool lcdShowTime() {
 bool lcdShowTemp() {
   if (dhtOK) {
     char buf[8] = "";
-    // Create the formatted time
-    snprintf_P(buf, sizeof(buf), PSTR("% d'C"), dhtTemp);
+    // Create the formatted line
+    snprintf_P(buf, sizeof(buf), PSTR("% 3d'c"), snsReport[SNS_ITP][0]);
     // Define the columns
     byte cols[] = {4, 8, 12, 16, 17};
 #if defined(DEBUG)
@@ -695,8 +699,8 @@ bool lcdShowTemp() {
 bool lcdShowHmdt() {
   if (dhtOK) {
     char buf[8] = "";
-    // Create the formatted time
-    snprintf_P(buf, sizeof(buf), PSTR("% d%%"), dhtHmdt);
+    // Create the formatted line
+    snprintf_P(buf, sizeof(buf), PSTR("% 3d%%"), snsReport[SNS_IHM][0]);
     // Define the columns
     byte cols[] = {4, 8, 12, 16};
 #if defined(DEBUG)
@@ -714,7 +718,7 @@ bool lcdShowHmdt() {
 
   @param serial print on serial port too
 */
-bool lcdShowWiFi(bool serial) {
+bool lcdShowWiFi(bool serial = true) {
   if (WiFi.isConnected()) {
     char ipbuf[16], gwbuf[16], nsbuf[16];
 
@@ -722,21 +726,23 @@ bool lcdShowWiFi(bool serial) {
     charIP(WiFi.gatewayIP(), gwbuf, sizeof(ipbuf), true);
     charIP(WiFi.dnsIP(), nsbuf, sizeof(ipbuf), true);
 
-    Serial.println();
-    Serial.print(F("WiFi connected to "));
-    Serial.print(WiFi.SSID());
-    Serial.print(F(" on channel "));
-    Serial.print(WiFi.channel());
-    Serial.print(F(", RSSI "));
-    Serial.print(WiFi.RSSI());
-    Serial.println(F(" dBm."));
-    Serial.print(F(" IP : "));
-    Serial.println(ipbuf);
-    Serial.print(F(" GW : "));
-    Serial.println(gwbuf);
-    Serial.print(F(" DNS: "));
-    Serial.println(nsbuf);
-    Serial.println();
+    if (serial) {
+      Serial.println();
+      Serial.print(F("WiFi connected to "));
+      Serial.print(WiFi.SSID());
+      Serial.print(F(" on channel "));
+      Serial.print(WiFi.channel());
+      Serial.print(F(", RSSI "));
+      Serial.print(WiFi.RSSI());
+      Serial.println(F(" dBm."));
+      Serial.print(F(" IP : "));
+      Serial.println(ipbuf);
+      Serial.print(F(" GW : "));
+      Serial.println(gwbuf);
+      Serial.print(F(" DNS: "));
+      Serial.println(nsbuf);
+      Serial.println();
+    };
 
     lcd.setCursor(0, 0);
     lcd.printf("WiFi % 15s", WiFi.SSID().c_str());
@@ -824,7 +830,7 @@ bool lcdShowSensor(int sensor) {
 
   if (snsReport[sensor][1] > 0) {
     if      (sensor == SNS_OTP) {
-      sprintf(text, "% d'C", snsReport[sensor][0]);
+      sprintf(text, "% 3d'c", snsReport[sensor][0]);
       byte cols[] = {4, 8, 12, 16, 17};
 #if defined(DEBUG)
       Serial.print("SCR_OTP ");
@@ -834,7 +840,7 @@ bool lcdShowSensor(int sensor) {
       lcdLgPrint(text, cols);
     }
     else if (sensor == SNS_OHM) {
-      sprintf(text, "% d%%", snsReport[sensor][0]);
+      sprintf(text, "% 3d%%", snsReport[sensor][0]);
       byte cols[] = {4, 8, 12, 16};
 #if defined(DEBUG)
       Serial.print("SCR_OHM ");
@@ -844,7 +850,7 @@ bool lcdShowSensor(int sensor) {
       lcdLgPrint(text, cols);
     }
     else if (sensor == SNS_ODP) {
-      sprintf(text, "% d'C", snsReport[sensor][0]);
+      sprintf(text, "% 3d'c", snsReport[sensor][0]);
       byte cols[] = {4, 8, 12, 16, 17};
 #if defined(DEBUG)
       Serial.print("SCR_ODP ");
@@ -854,7 +860,7 @@ bool lcdShowSensor(int sensor) {
       lcdLgPrint(text, cols);
     }
     else if (sensor == SNS_OPS) {
-      sprintf(text, "% d", snsReport[sensor][0]);
+      sprintf(text, "% 4d", snsReport[sensor][0]);
       byte cols[] = {0, 4, 8, 12, 16};
 #if defined(DEBUG)
       Serial.print("SCR_OPS ");
@@ -863,9 +869,8 @@ bool lcdShowSensor(int sensor) {
       lcd.clear();
       lcdLgPrint(text, cols);
     }
-    //if (snsReport[idxReport][1] + SNS_INTERVAL < millis()) {
-    //  snsClear(sensor);
-    //}
+    if (snsReport[sensor][1] + snsTTL < millis())
+      snsReport[sensor][1] = 0;
     return true;
   }
 
@@ -1135,9 +1140,12 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
     else if (strcmp(pTrunk, nodename) == 0) {
       if (strcmp(pBranch, "restart") == 0)
         ESP.restart();
-      else if (strcmp(pBranch, "beep") == 0)
+      else if (strcmp(pBranch, "beep") == 0) {
         // Just beep
-        tone(pinBeep, 2000, 250);
+        int freq = atoi(message);
+        if (!freq) freq = 2000;
+        tone(pinBeep, freq, 250);
+      }
       else if (strcmp(pBranch, "light") == 0) {
         if (strcmp(message, "on") == 0) {
           // Lights on
@@ -1329,7 +1337,7 @@ void setup() {
   lcdShowWiFi(true);
 
   // OTA Update
-  ArduinoOTA.setPort(8266);
+  ArduinoOTA.setPort(otaPort);
   ArduinoOTA.setHostname(NODENAME);
   // ArduinoOTA.setPassword((const char *)"123");
 
@@ -1337,6 +1345,10 @@ void setup() {
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("OTA");
+    lcd.setCursor(LCD_COLS - 12, 0);
+    lcd.print("[");
+    lcd.setCursor(LCD_COLS - 1, 0);
+    lcd.print("]");
     Serial.println(F("OTA Start"));
   });
 
@@ -1345,9 +1357,13 @@ void setup() {
   });
 
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    lcd.setCursor(0, 1);
-    lcd.print(progress);
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    int otaPrg = progress / (total / 10);
+    if (otaProgress != otaPrg) {
+      otaProgress = otaPrg;
+      lcd.setCursor(LCD_COLS - 12 + otaProgress, 0);
+      lcd.print("|");
+      Serial.printf("Progress: %u%%\r", otaProgress * 10);
+    }
   });
 
   ArduinoOTA.onError([](ota_error_t error) {
@@ -1378,9 +1394,10 @@ void setup() {
   yield();
 
   // DHT11
-  dhtOK = dht.read(pinDHT, NULL, NULL, NULL) == 0;
-  if (dhtOK) Serial.println(F("DHT11 sensor detected"));
-  else       Serial.println(F("DHT11 sensor missing"));
+  if (dht.read(pinDHT, NULL, NULL, NULL) == 0)
+    Serial.println(F("DHT11 sensor detected"));
+  else
+    Serial.println(F("DHT11 sensor missing"));
 
   // Finally, start the LCD timer
   delayLCD.start(LCD_INTERVAL, AsyncDelay::MILLIS);
@@ -1425,7 +1442,7 @@ void loop() {
   if (millis() >= snsNextTime) {
     if (dhtDrop) {
       // Drop this reading
-      dhtRead(&dhtTemp, &dhtHmdt, true);
+      dhtRead(&snsReport[SNS_ITP][0], &snsReport[SNS_IHM][0], true);
       // Don't drop the next one
       dhtDrop = false;
       // Try again after 2 seconds
@@ -1435,14 +1452,19 @@ void loop() {
       // Drop the next reading, again
       dhtDrop = true;
       // Get the temperature and humidity
-      if (dhtRead(&dhtTemp, &dhtHmdt, false)) {
+      if (dhtRead(&snsReport[SNS_ITP][0], &snsReport[SNS_IHM][0], false)) {
+        snsReport[SNS_ITP][1] = millis();
+        snsReport[SNS_IHM][1] = millis();
+        dhtOK = true;
         // Compose and publish the telemetry
         char text[8] = "";
-        snprintf_P(text, sizeof(text), PSTR("%d"), dhtTemp);
+        snprintf_P(text, sizeof(text), PSTR("%d"), snsReport[SNS_ITP][0]);
         mqttPub(text, mqttTopicSns, "indoor", "temperature");
-        snprintf_P(text, sizeof(text), PSTR("%d"), dhtHmdt);
+        snprintf_P(text, sizeof(text), PSTR("%d"), snsReport[SNS_IHM][0]);
         mqttPub(text, mqttTopicSns, "indoor", "humidity");
       }
+      else
+        dhtOK = false;
 
       // Publish the connection report
       char topic[32], buf[16];
