@@ -514,7 +514,7 @@ byte lcdLgConstruct(char chr, byte *charShapes, size_t len) {
       }
       break;
     case '4': {
-        byte tmpShapes[] = {0x01, 0x20, 0x20,  0xff, 0x01, 0xff,  0x20, 0x20, 0xff,  0x20, 0x20, 0x00};
+        byte tmpShapes[] = {0x01, 0x20, 0x20,  0xff, 0x01, 0xff,  0x20, 0x20, 0xff,  0x20, 0x20, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
@@ -579,8 +579,7 @@ byte lcdLgConstruct(char chr, byte *charShapes, size_t len) {
       }
       break;
     case '%': {
-        //byte tmpShapes[] = {0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x07, 0x02, 0x05,  0x02, 0x05, 0x07};
-        byte tmpShapes[] = {0x20, 0x20, 0x20,  0x07, 0x20, 0x02,  0x02, 0x06, 0x05,  0x05, 0x20, 0x07};
+        byte tmpShapes[] = {0x07, 0x20, 0x02,  0x02, 0x06, 0x05,  0x05, 0x20, 0x07,  0x20, 0x20, 0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
@@ -826,7 +825,7 @@ bool lcdShowSensor(int sensor) {
   if (snsReport[sensor][1] > 0) {
     if      (sensor == SNS_OTP) {
       sprintf(text, "% d'C", snsReport[sensor][0]);
-      byte cols[] = {4, 8, 12, 16, 17}; //{2, 6, 10, 15, 16};
+      byte cols[] = {4, 8, 12, 16, 17};
 #if defined(DEBUG)
       Serial.print("SCR_OTP ");
       Serial.println(text);
