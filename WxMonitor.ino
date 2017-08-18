@@ -734,7 +734,7 @@ bool lcdShowSensor(int sensor) {
       lcd.clear();
       lcdLgPrint(text, cols);
     }
-    if (snsReport[sensor][1] + snsTTL < millis())
+    if (snsReport[sensor][1] + snsTTL < millis() / 1000)
       snsReport[sensor][1] = 0;
     return true;
   }
