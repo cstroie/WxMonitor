@@ -132,10 +132,10 @@ bool          ntpOk                 = false;                  // Flag to know th
 const int     ntpTZ                 = 3;                      // Time zone
 
 // Wx
-const char wxStation[] = "ROXX0003";
-enum WX_REPKEYS {WX_NOW, WX_TOD, WX_TON, WX_TOM, WX_DAT, WX_SUN, WX_MON, WX_BAR, WX_ALL};
-char wxRepKeys[][4] = {"now", "tod", "ton", "tom", "dat", "sun", "mon", "bar"};
-char wxReport[WX_ALL][2][LCD_COLS];
+const char    wxStation[]           = "ROXX0003";
+enum          WX_KEYS               {WX_NOW, WX_TOD, WX_TON, WX_TOM, WX_DAT, WX_SUN, WX_MON, WX_BAR, WX_ALL};
+char          wxRepKeys[][4]        = {"now", "tod", "ton", "tom", "dat", "sun", "mon", "bar"};
+char          wxReport[WX_ALL][2][LCD_COLS];                  // Weather storage
 
 // MQTT parameters
 // TODO FPSTR()
@@ -166,7 +166,7 @@ const int           pinDHT        = D4;           // Temperature/humidity sensor
 // Sensors
 enum                SNS_KEYS      {SNS_ITP, SNS_IHM, SNS_OTP, SNS_OHM, SNS_ODP, SNS_OPS, SNS_ALL};
 int                 snsReport[SNS_ALL][2];        // Sensors storage
-const int           snsTTL = 600 * 1000;          // Sensors readings time to live
+const int           snsTTL        = 600;          // Sensors readings time to live (seconds)
 // Set ADC to Voltage
 ADC_MODE(ADC_VCC);
 
@@ -304,7 +304,29 @@ unsigned long ntpSync() {
   return ntpTime - 2208988800UL;            // convert to Unix time
 }
 
+/**
+  Get the uptime
 
+  @param buf character array to return the text to
+  @param len the maximum length of the character array
+  @return uptime in seconds
+*/
+unsigned long uptime(char *buf, size_t len) {
+  // Get the uptime in seconds
+  unsigned long upt = millis() / 1000;
+  // Compute hours, minutes and seconds
+  int ss =  upt % 60;
+  //upt -= ss;
+  int mm = (upt % 3600) / 60;
+  //upt -= mm * 60;
+  int hh = (upt % 86400L) / 3600;
+  //upt -= hh * 3600;
+  int dd =  upt / 86400L;
+  // Create the formatted time
+  snprintf_P(buf, len, PSTR("%d days, %02d:%02d:%02d"), dd, hh, mm, ss);
+  // Return the uptime in seconds
+  return upt;
+}
 
 /**
   LCD initialization
@@ -1071,14 +1093,15 @@ void mqttSubscribeAll(const char *lvl1, const char *lvl2 = NULL) {
 */
 boolean mqttReconnect() {
   Serial.println(F("MQTT connecting..."));
-  if (mqttClient.connect(mqttId)) {
+  char buf[32];
+  strcpy(buf, mqttTopicRpt);
+  strcat(buf, "/");
+  strcat(buf, nodename);
+  if (mqttClient.connect(mqttId, buf, 0, true, "offline")) {
+    // Publish the "online" status
+    mqttPubRet("online", buf);
     // Publish the connection report
-    char buf[32];
-    strcpy(buf, mqttTopicRpt);
-    strcat(buf, "/");
-    strcat(buf, nodename);
-    strcat(buf, "/");
-    strcat(buf, "wifi");
+    strcat(buf, "/wifi");
     mqttPubRet(WiFi.hostname().c_str(), buf, "hostname");
     mqttPubRet(WiFi.macAddress().c_str(), buf, "mac");
     mqttPubRet(WiFi.SSID().c_str(), buf, "ssid");
@@ -1217,19 +1240,19 @@ void wxClear(int report) {
   @param strMessage the sensor value
 */
 void snsProcess(const char *sensor, char *message) {
-  int idxReport = -1;
+  int report = -1;
   if      (strcmp(sensor, "temperature") == 0)
-    idxReport = SNS_OTP;
+    report = SNS_OTP;
   else if (strcmp(sensor, "humidity") == 0)
-    idxReport = SNS_OHM;
+    report = SNS_OHM;
   else if (strcmp(sensor, "dewpoint") == 0)
-    idxReport = SNS_ODP;
+    report = SNS_ODP;
   else if (strcmp(sensor, "sealevel") == 0)
-    idxReport = SNS_OPS;
+    report = SNS_OPS;
   // Store the sensor data and age
-  if (idxReport != -1) {
-    snsReport[idxReport][0] = atoi(message);
-    snsReport[idxReport][1] = millis() / 1000;
+  if (report != -1) {
+    snsReport[report][0] = atoi(message);
+    snsReport[report][1] = millis() / 1000;
   }
 }
 
@@ -1263,10 +1286,10 @@ bool dhtRead(int *temp, int *hmdt, bool drop = false) {
   byte t = 0, h = 0;
   bool ok = false;
   if (drop)
-    // First read
+    // Read and drop
     ok = dht.read(pinDHT, NULL, NULL, NULL);
   else {
-    // Second read
+    // Read and store
     if (dht.read(pinDHT, &t, &h, NULL) == 0) {
       if (temp) *temp = (int)t;
       if (hmdt) *hmdt = (int)h;
@@ -1310,7 +1333,7 @@ void wifiCallback (WiFiManager *wifiMgr) {
 void setup() {
   // Init the serial com
   Serial.println();
-  Serial.begin(115200);
+  Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
   Serial.print(NODENAME);
   Serial.print(F(" "));
   Serial.println(__DATE__);
@@ -1321,6 +1344,8 @@ void setup() {
   // LCD init
   lcdInit();
 
+  // Set the host name
+  WiFi.hostname(NODENAME);
   // Try to connect to WiFi
   WiFiManager wifiManager;
   wifiManager.setTimeout(300);
@@ -1394,7 +1419,7 @@ void setup() {
   yield();
 
   // DHT11
-  if (dht.read(pinDHT, NULL, NULL, NULL) == 0)
+  if (dhtRead(NULL, NULL))
     Serial.println(F("DHT11 sensor detected"));
   else
     Serial.println(F("DHT11 sensor missing"));
@@ -1440,51 +1465,50 @@ void loop() {
 
   // Read the sensors and publish the telemetry
   if (millis() >= snsNextTime) {
-    if (dhtDrop) {
-      // Drop this reading
-      dhtRead(&snsReport[SNS_ITP][0], &snsReport[SNS_IHM][0], true);
-      // Don't drop the next one
-      dhtDrop = false;
-      // Try again after 2 seconds
-      snsNextTime += 2000UL;
+    // Get the temperature and humidity from DHT11
+    if (dhtRead(&snsReport[SNS_ITP][0], &snsReport[SNS_IHM][0])) {
+      int rdtime = millis() / 1000;
+      snsReport[SNS_ITP][1] = rdtime;
+      snsReport[SNS_IHM][1] = rdtime;
+      dhtOK = true;
+      // Compose and publish the telemetry
+      char text[8] = "";
+      snprintf_P(text, sizeof(text), PSTR("%d"), snsReport[SNS_ITP][0]);
+      mqttPub(text, mqttTopicSns, "indoor", "temperature");
+      snprintf_P(text, sizeof(text), PSTR("%d"), snsReport[SNS_IHM][0]);
+      mqttPub(text, mqttTopicSns, "indoor", "humidity");
     }
-    else {
-      // Drop the next reading, again
-      dhtDrop = true;
-      // Get the temperature and humidity
-      if (dhtRead(&snsReport[SNS_ITP][0], &snsReport[SNS_IHM][0], false)) {
-        snsReport[SNS_ITP][1] = millis();
-        snsReport[SNS_IHM][1] = millis();
-        dhtOK = true;
-        // Compose and publish the telemetry
-        char text[8] = "";
-        snprintf_P(text, sizeof(text), PSTR("%d"), snsReport[SNS_ITP][0]);
-        mqttPub(text, mqttTopicSns, "indoor", "temperature");
-        snprintf_P(text, sizeof(text), PSTR("%d"), snsReport[SNS_IHM][0]);
-        mqttPub(text, mqttTopicSns, "indoor", "humidity");
-      }
-      else
-        dhtOK = false;
+    else
+      dhtOK = false;
 
-      // Publish the connection report
-      char topic[32], buf[16];
-      // Create the topic
-      // TODO strcat_P
-      strcpy(topic, mqttTopicRpt);
-      strcat(topic, "/");
-      strcat(topic, nodename);
-      // Create and publish the reports
-      snprintf_P(buf, sizeof(buf), PSTR("%d"), millis() / 1000);
-      mqttPubRet(buf, topic, "uptime");
-      snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getFreeHeap());
-      mqttPubRet(buf, topic, "heap");
-      snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getVcc());
-      mqttPubRet(buf, topic, "vcc");
-      // Add the WiFi topic
-      strcat_P(topic, PSTR("/wifi"));
-      mqttPubRet(WiFi.RSSI(), topic, "rssi");
-    }
-    // Try again after the delay
-    snsNextTime += snsDelay - 2000UL;
+    // Publish the connection report
+    char topic[32], buf[16];
+    // Create the topic
+    // TODO strcat_P
+    strcpy(topic, mqttTopicRpt);
+    strcat(topic, "/");
+    strcat(topic, nodename);
+    // Uptime
+    char upt[32] = "";
+    unsigned long ups = 0;
+    ups = uptime(upt, sizeof(upt));
+    Serial.println(upt);
+    snprintf_P(buf, sizeof(buf), PSTR("%d"), ups);
+    mqttPubRet(buf, topic, "uptime");
+    mqttPubRet(upt, topic, "uptime", "text");
+    // Free heap
+    snprintf_P(buf, sizeof(buf), PSTR("%d"), ESP.getFreeHeap());
+    mqttPubRet(buf, topic, "heap");
+    // Power supply
+    int vcc = ESP.getVcc();
+    snprintf_P(buf, sizeof(buf), PSTR("%d.%d"), vcc / 1000, vcc % 1000);
+    mqttPubRet(buf, topic, "vcc");
+    // Add the WiFi topic and publish the RSSI value
+    strcat_P(topic, PSTR("/wifi"));
+    mqttPubRet(WiFi.RSSI(), topic, "rssi");
+
+    // Repeat after the delay
+    snsNextTime += snsDelay;
   }
 }
+
