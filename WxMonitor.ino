@@ -61,7 +61,7 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.3";
+const char VERSION[]  = "3.4";
 
 // OTA
 int otaProgress = 0;
@@ -87,7 +87,7 @@ int lcdChars;
 bool lcdLight = true;         // Global flag to keep track of LCD backlight status
 
 // Array of 8 logo characters defined column-wise
-const uint8_t LCD_BGLOGO[8 * 8] PROGMEM = {
+const uint8_t lcdLogoShapes[] PROGMEM = {
   B11011, B00000, B10001, B00000, B00000, B01100, B01100, B00000,
   B11011, B00000, B11011, B00000, B00000, B01100, B01100, B00000,
   B11011, B11011, B11111, B01110, B11110, B00000, B11110, B01011,
@@ -99,19 +99,7 @@ const uint8_t LCD_BGLOGO[8 * 8] PROGMEM = {
 };
 
 // Array of 8 characters defined column-wise
-const uint8_t LCD_BGNUM_SHAPES[8 * 8] PROGMEM = {
-  B11111, B00000, B11111, B11111, B00000, B00000, B00000, B00000,
-  B11111, B00000, B11111, B11111, B00000, B00000, B00000, B00000,
-  B11111, B00000, B00000, B00000, B00000, B00001, B10000, B00000,
-  B00000, B00000, B00000, B00000, B00000, B00011, B11000, B00000,
-  B00000, B00000, B00000, B00000, B00000, B00011, B11000, B00000,
-  B00000, B11111, B00000, B00000, B00000, B00001, B10000, B00000,
-  B00000, B11111, B11111, B00000, B11111, B00000, B00000, B00000,
-  B00000, B11111, B11111, B00000, B11111, B00000, B00000, B00000,
-};
-
-// Array of 8 characters defined column-wise
-const uint8_t LCD_LGNUM_SHAPES[8 * 8] PROGMEM = {
+const uint8_t lcdLgNumShapes[] PROGMEM = {
   B11111, B00000, B00000, B00000, B11111, B11111, B00011, B00000,
   B11111, B00000, B00000, B00000, B01111, B11110, B01111, B00000,
   B11111, B00000, B00000, B00000, B01111, B11110, B01111, B01110,
@@ -121,6 +109,7 @@ const uint8_t LCD_LGNUM_SHAPES[8 * 8] PROGMEM = {
   B00000, B11111, B01111, B11110, B00000, B00000, B11110, B00000,
   B00000, B11111, B11111, B11111, B00000, B00000, B11000, B00000,
 };
+
 
 // Time synchronization and time keeping
 WiFiUDP       ntpClient;                                      // NTP UDP client
@@ -338,15 +327,15 @@ void lcdInit() {
 }
 
 /**
-  LCD display the logo
+  LCD display the logo "Wx Monitor"
 */
 void lcdLogo() {
-  byte text[] = {0, 1, 32, 2, 3, 4, 5, 6, 3, 7}; // "Wx Monitor"
+  const static byte lcdLogoText[] PROGMEM = {0x00, 0x01, 0x20, 0x02, 0x03, 0x04, 0x05, 0x06, 0x03, 0x07};
   lcdDefChars(LCD_LOGO);
   lcd.clear();
-  lcd.setCursor((LCD_COLS - sizeof(text)) / 2, 1);
-  for (byte item = 0; item < sizeof(text); item++)
-    lcd.write(text[item]);
+  lcd.setCursor((LCD_COLS - sizeof(lcdLogoText)) / 2, 1);
+  for (byte item = 0; item < sizeof(lcdLogoText); item++)
+    lcd.write(pgm_read_byte(lcdLogoText + item));
   lcd.setCursor(LCD_COLS - strlen(VERSION) - 1, LCD_ROWS - 1);
   lcd.print("v");
   lcd.print(VERSION);
@@ -370,31 +359,14 @@ void lcdDefBig(const uint8_t chars[]) {
 void lcdDefChars(int lcdCharsType) {
   switch (lcdCharsType) {
     case LCD_LOGO:
-      lcdDefBig(LCD_BGLOGO);
-      lcdChars = lcdCharsType;
-      break;
-    case LCD_BGNUM:
-      lcdDefBig(LCD_BGNUM_SHAPES);
+      lcdDefBig(lcdLogoShapes);
       lcdChars = lcdCharsType;
       break;
     case LCD_LGNUM:
-      lcdDefBig(LCD_LGNUM_SHAPES);
+      lcdDefBig(lcdLgNumShapes);
       lcdChars = lcdCharsType;
       break;
   }
-}
-
-/**
-  Copy the source array to destination array and return the length
-
-  @param dst the destination array
-  @param src the source array
-  @param len the length of the source array
-  @return the number of columns (half the length of the source array)
-*/
-byte copyArray(byte *dst, byte *src, byte len) {
-  memcpy(dst, src, len);
-  return len >> 1;
 }
 
 /**
@@ -405,108 +377,9 @@ byte copyArray(byte *dst, byte *src, byte len) {
   @param len the length of the source array
   @return the number of columns (half the length of the source array)
 */
-byte copyLgShape(byte *dst, byte *src, byte len) {
-  memcpy(dst, src, len);
+byte copyLgShape(byte *dst, const byte *src, size_t len) {
+  memcpy_P(dst, src, len);
   return len >> 2;
-}
-
-/**
-  LCD Construct the big characters (on 2 lines)
-
-  @param chr the character to define
-  @param charShapes array of needed character shapes
-  @return the number of display columns the character uses
-*/
-byte lcdBigConstruct(char chr, byte *charShapes, size_t len) {
-  byte charCols = 0;
-  switch (chr) {
-    case '0': {
-        byte tmpShapes[] = {255, 3, 255, 255, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '1': {
-        byte tmpShapes[] = {0, 255, 32, 1, 255, 1};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '2': {
-        byte tmpShapes[] = {0, 2, 255, 255, 4, 1};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '3': {
-        byte tmpShapes[] = {0, 2, 255, 1, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '4': {
-        byte tmpShapes[] = {255, 4, 255, 32, 32, 255};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '5': {
-        byte tmpShapes[] = {255, 2, 0, 1, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '6': {
-        byte tmpShapes[] = {255, 2, 0, 255, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '7': {
-        byte tmpShapes[] = {0, 3, 255, 32, 32, 255};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '8': {
-        byte tmpShapes[] = {255, 2, 255, 255, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '9': {
-        byte tmpShapes[] = {255, 2, 255, 1, 4, 255};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case 'C': {
-        byte tmpShapes[] = {255, 3, 0, 255, 4, 1};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '-': {
-        byte tmpShapes[] = {32, 1, 1, 32, 32, 32};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case ' ': {
-        byte tmpShapes[] = {32, 32, 32, 32, 32, 32};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case ':': {
-        byte tmpShapes[] = {5, 6, 5, 6};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '.': {
-        byte tmpShapes[] = {32, 32, 5, 6};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '\'': {
-        byte tmpShapes[] = {5, 6, 32, 32};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '%': {
-        byte tmpShapes[] = {5, 6, 1, 0, 1, 0, 5, 6};
-        charCols = copyArray(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-  }
-  return charCols;
 }
 
 /**
@@ -516,117 +389,101 @@ byte lcdBigConstruct(char chr, byte *charShapes, size_t len) {
   @param charShapes array of needed character shapes
   @return the number of display columns the character uses
 */
-byte lcdLgConstruct(char chr, byte *charShapes, size_t len) {
+byte lcdLgConstruct(char chr, byte *charShapes) {
   byte charCols = 0;
   switch (chr) {
     case '0': {
-        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
+        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '1': {
-        byte tmpShapes[] = {0x01, 0x03, 0x20,  0x20, 0xff, 0x20,  0x20, 0xff, 0x20,  0x00, 0x00, 0x00};
+        const static byte tmpShapes[] PROGMEM = {0x01, 0x03, 0x20,  0x20, 0xff, 0x20,  0x20, 0xff, 0x20,  0x00, 0x00, 0x00};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '2': {
-        byte tmpShapes[] = {0x02, 0x01, 0x03,  0x02, 0x01, 0xff,  0xff, 0x20, 0x20,  0x04, 0x00, 0x00};
+        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0x02, 0x01, 0xff,  0xff, 0x20, 0x20,  0x04, 0x00, 0x00};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '3': {
-        byte tmpShapes[] = {0x02, 0x01, 0x03,  0x20, 0x01, 0xff,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05};
+        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0x20, 0x01, 0xff,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '4': {
-        byte tmpShapes[] = {0x01, 0x20, 0x20,  0xff, 0x01, 0xff,  0x20, 0x20, 0xff,  0x20, 0x20, 0x05};
+        const static byte tmpShapes[] PROGMEM = {0x01, 0x20, 0x20,  0xff, 0x01, 0xff,  0x20, 0x20, 0xff,  0x20, 0x20, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '5': {
-        byte tmpShapes[] = {0x01, 0x01, 0x01,  0xff, 0x01, 0x03,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05};
+        const static byte tmpShapes[] PROGMEM = {0x01, 0x01, 0x01,  0xff, 0x01, 0x03,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '6': {
-        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
+        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '7': {
-        byte tmpShapes[] = {0x01, 0x01, 0x01,  0x20, 0x02, 0xff,  0x20, 0xff, 0x20,  0x20, 0x00, 0x20};
+        const static byte tmpShapes[] PROGMEM = {0x01, 0x01, 0x01,  0x20, 0x02, 0xff,  0x20, 0xff, 0x20,  0x20, 0x00, 0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '8': {
-        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x01, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
+        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x01, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '9': {
-        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0xff,  0x20, 0x20, 0x05};
+        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0xff,  0x20, 0x20, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case 'C': {
-        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0x00,  0xff, 0x20, 0x01,  0x04, 0x00, 0x05};
+        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0x00,  0xff, 0x20, 0x01,  0x04, 0x00, 0x05};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case 'c': {
-        byte tmpShapes[] = {0x02, 0x01, 0x03,  0xff, 0x20, 0x20,  0x04, 0x00, 0x05,  0x20, 0x20, 0x20};
+        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0x20,  0x04, 0x00, 0x05,  0x20, 0x20, 0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '-': {
-        byte tmpShapes[] = {0x20, 0x20, 0x20,  0x20, 0x01, 0x01,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
+        const static byte tmpShapes[] PROGMEM = {0x20, 0x20, 0x20,  0x20, 0x01, 0x01,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case ' ': {
-        byte tmpShapes[] = {0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
+        const static byte tmpShapes[] PROGMEM = {0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case ':': {
-        byte tmpShapes[] = {0x20,  0x07,  0x07,  0x20};
+        const static byte tmpShapes[] PROGMEM = {0x20,  0x07,  0x07,  0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '.': {
-        byte tmpShapes[] = {0x20,  0x20,  0x20,  0x07};
+        const static byte tmpShapes[] PROGMEM = {0x20,  0x20,  0x20,  0x07};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '\'': {
-        byte tmpShapes[] = {0x07,  0x20,  0x20,  0x20};
+        const static byte tmpShapes[] PROGMEM = {0x07,  0x20,  0x20,  0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
     case '%': {
-        byte tmpShapes[] = {0x07, 0x20, 0x02,  0x02, 0x06, 0x05,  0x05, 0x20, 0x07,  0x20, 0x20, 0x20};
+        const static byte tmpShapes[] PROGMEM = {0x07, 0x20, 0x02,  0x02, 0x06, 0x05,  0x05, 0x20, 0x07,  0x20, 0x20, 0x20};
         charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
       }
       break;
   }
   return charCols;
-}
-
-/**
-  LCD Write one big custom charater (on 2 lines)
-
-  @param chr the character to write
-  @param col the column to write the character
-*/
-void lcdBigWrite(char chr, byte col, byte row = 0) {
-  byte charShapes[10];
-  byte charCols = lcdBigConstruct(chr, charShapes, sizeof(charShapes));
-  for (byte line = 0; line < 2; line++) {
-    lcd.setCursor(col, line + row);
-    for (byte item = line * charCols; item < charCols * (line + 1); item++)
-      lcd.write(byte(charShapes[item]));
-  }
 }
 
 /**
@@ -636,26 +493,13 @@ void lcdBigWrite(char chr, byte col, byte row = 0) {
   @param col the column to write the character
 */
 void lcdLgWrite(char chr, byte col, byte row = 0) {
-  byte charShapes[12];
-  byte charCols = lcdLgConstruct(chr, charShapes, sizeof(charShapes));
-  for (byte line = 0; line < 4; line++) {
+  byte charShapes[32];
+  byte charCols = lcdLgConstruct(chr, charShapes);
+  for (byte line = 0; line < LCD_ROWS; line++) {
     lcd.setCursor(col, line + row);
     for (byte item = line * charCols; item < charCols * (line + 1); item++)
       lcd.write(byte(charShapes[item]));
   }
-}
-
-/**
-  LCD Write big custom charaters (on 2 lines)
-
-  @param text the text to write
-  @param cols the columns to write each character
-  @param type the character type to use
-*/
-void lcdBigPrint(const char *text, const byte *cols, byte row = 0, int type = LCD_BGNUM) {
-  if (lcdChars != type) lcdDefChars(type);
-  for (int i = 0; i <= sizeof(text); i++)
-    lcdBigWrite(text[i], cols[i]);
 }
 
 /**
@@ -848,7 +692,7 @@ bool lcdShowWeather(int report) {
   @param sensor the sensor to display
 */
 bool lcdShowSensor(int sensor) {
-  char text[6] = "";
+  char text[8] = "";
 
   if (snsReport[sensor][1] > 0) {
     if      (sensor == SNS_OTP) {
@@ -897,20 +741,6 @@ bool lcdShowSensor(int sensor) {
   }
 
   return false;
-}
-
-/**
-  LCD Clear the display then print the two lines
-
-  @param upLine text to print on upper line
-  @param lwLine text to print on lower line
-*/
-void lcdScreen(char *upLine, char *lwLine) {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(upLine);
-  lcd.setCursor(0, 1);
-  lcd.print(lwLine);
 }
 
 /**
