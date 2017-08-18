@@ -64,27 +64,22 @@ const char nodename[] = "wxmon";
 const char VERSION[]  = "3.4";
 
 // OTA
-int otaProgress = 0;
-int otaPort = 8266;
+int otaProgress       = 0;
+int otaPort           = 8266;
 
 // LCD
-#define WIRECLOCK     400000L   // tell hd44780 to use 400kHz i2c clock rate
-hd44780_I2Cexp        lcd;      // auto locate and autoconfig interface pins
-#define HD44780_LCDOBJECT       // tell the hd44780 sketch the lcd object has been declared
-const int LCD_COLS = 20;
-const int LCD_ROWS = 4;
-const int LCD_INTERVAL = 4 * 1000;
-enum LCD_SCREENS {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON, SCR_ALL};
-enum LCD_CHARS {LCD_LOGO, LCD_BGNUM, LCD_LGNUM, LCD_MOON, LCD_ALL};
-
-
-AsyncDelay delayLCD;
-
-// Global LCD screen index
-int lcdIndex = 0;
-// Global LCD custom characters type
-int lcdChars;
-bool lcdLight = true;         // Global flag to keep track of LCD backlight status
+#define             WIRECLOCK     400000L   // tell hd44780 to use 400kHz i2c clock rate
+hd44780_I2Cexp      lcd;                    // auto locate and autoconfig interface pins
+#define             HD44780_LCDOBJECT       // tell the hd44780 sketch the lcd object has been declared
+const int           LCD_COLS      = 20;     // LCD columns
+const int           LCD_ROWS      = 4;      // LCD rows
+enum                LCD_SCREENS   {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON, SCR_ALL};
+enum                LCD_CHARS     {LCD_LOGO, LCD_BGNUM, LCD_LGNUM, LCD_MOON, LCD_ALL};
+const unsigned long lcdDelay      = 4000UL; // Delay between changing the screen
+unsigned long       lcdNextTime   = 0UL;    // Next time to change the screen
+int                 lcdIndex      = 0;      // Global LCD screen index
+bool                lcdLight      = true;   // Global flag to keep track of LCD backlight status
+int                 lcdChars      = -1;     // Global LCD custom characters type
 
 // Array of 8 logo characters defined column-wise
 const uint8_t lcdLogoShapes[] PROGMEM = {
@@ -671,16 +666,20 @@ bool lcdShowWeather(int report) {
       lcd.printf(tplUpLn.c_str(), wxReport[report][0]);
     else
       lcd.print(wxReport[report][0]);
+#ifdef DEBUG
     Serial.print("LN 1: ");
     Serial.println(wxReport[report][0]);
+#endif
     // Print the lower line
     lcd.setCursor(0, 1);
     if (tplLwLn != "")
       lcd.printf(tplLwLn.c_str(), wxReport[report][1]);
     else
       lcd.print(wxReport[report][1]);
+#ifdef DEBUG
     Serial.print("LN 2: ");
     Serial.println(wxReport[report][1]);
+#endif
     return true;
   }
   return false;
@@ -751,7 +750,7 @@ bool lcdShowSensor(int sensor) {
   @param index the screen index to display
   @return recommended next index if the required screen has succeeded,
           -1 if the default screen has been selected,
-          0 if the screen failed
+           0 if the screen failed
 */
 int lcdShowScreen(int index) {
   bool result;
@@ -823,12 +822,15 @@ void lcdRotateScreens() {
   do {
     nextIndex = lcdShowScreen(lcdIndex);
     if (nextIndex == -1) {
+      // Default has been displayed
       lcdIndex = 1;
       nextIndex = 1;
     }
     else if (nextIndex == 0)
+      // There was an error, try the next
       lcdIndex += 1;
     else
+      // Successful display, set the next
       lcdIndex = nextIndex;
 #if defined(DEBUG)
     Serial.print(F("SCR_NXT "));
@@ -968,6 +970,10 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   memcpy(message, payload, length);
   message[length] = '\0';
 
+#ifdef DEBUG
+  Serial.printf("MQTT %s: %s\r\n", topic, message);
+#endif
+
   // Decompose the topic
   char *pRoot = NULL, *pTrunk = NULL, *pBranch = NULL;
   pRoot = topic;
@@ -977,10 +983,6 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   pBranch = strchr(pTrunk, '/');
   if (pBranch != NULL)
     *pBranch++ = '\0';
-
-#ifdef DEBUG
-  Serial.printf("MQTT %s: %s\r\n", topic, message);
-#endif
 
   // Dispatcher
   if (strcmp(pRoot, "wx") == 0 and strcmp(pTrunk, wxStation) == 0)
@@ -1146,13 +1148,16 @@ void pirInterrupt() {
   }
   // Set again the timer to disable the backlight
   pirNextTime = millis() + pirDelay;
-  //Serial.println("Motion detected");
+#ifdef DEBUG
+  Serial.println(F("Motion detected"));
+#endif
 }
 
 /**
   Feedback notification when SoftAP is started
 */
 void wifiCallback (WiFiManager *wifiMgr) {
+  // TODO
   String strMsg = "Connect to ";
   strMsg += wifiMgr->getConfigPortalSSID();
   Serial.println(strMsg);
@@ -1161,9 +1166,9 @@ void wifiCallback (WiFiManager *wifiMgr) {
 }
 
 void setup() {
-  // Init the serial com
-  Serial.println();
+  // Init the serial interface
   Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
+  Serial.println();
   Serial.print(NODENAME);
   Serial.print(F(" "));
   Serial.println(__DATE__);
@@ -1181,6 +1186,7 @@ void setup() {
   wifiManager.setTimeout(300);
   wifiManager.setAPCallback(wifiCallback);
   while (!wifiManager.autoConnect(NODENAME)) {
+    // TODO
     String strMsg = "No WiFi network ";
     Serial.println(strMsg);
     lcd.setCursor(0, 1);
@@ -1217,7 +1223,9 @@ void setup() {
       otaProgress = otaPrg;
       lcd.setCursor(LCD_COLS - 12 + otaProgress, 0);
       lcd.print("|");
+#ifdef DEBUG
       Serial.printf("Progress: %u%%\r", otaProgress * 10);
+#endif
     }
   });
 
@@ -1236,7 +1244,9 @@ void setup() {
   });
 
   ArduinoOTA.begin();
+#ifdef DEBUG
   Serial.println(F("OTA Ready"));
+#endif
 
   // Start time sync
   timeUNIX();
@@ -1254,8 +1264,8 @@ void setup() {
   else
     Serial.println(F("DHT11 sensor missing"));
 
-  // Finally, start the LCD timer
-  delayLCD.start(LCD_INTERVAL, AsyncDelay::MILLIS);
+  // Start the LCD timer
+  lcdNextTime = millis() + lcdDelay;
 
   // PIR pin and interrupt
   pinMode(pinPIR, INPUT);
@@ -1282,9 +1292,10 @@ void loop() {
   yield();
 
   // Rotate the LCD screens
-  if (delayLCD.isExpired()) {
+  if (millis() >= lcdNextTime) {
     lcdRotateScreens();
-    delayLCD.repeat();
+    // Repeat after the delay
+    lcdNextTime += lcdDelay;
   }
 
   // Check if motion detection has expired
@@ -1322,7 +1333,6 @@ void loop() {
     char upt[32] = "";
     unsigned long ups = 0;
     ups = uptime(upt, sizeof(upt));
-    Serial.println(upt);
     snprintf_P(buf, sizeof(buf), PSTR("%d"), ups);
     mqttPubRet(buf, topic, "uptime");
     mqttPubRet(upt, topic, "uptime", "text");
@@ -1341,4 +1351,3 @@ void loop() {
     snsNextTime += snsDelay;
   }
 }
-
