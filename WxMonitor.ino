@@ -20,8 +20,8 @@
 */
 
 // The DEBUG flag
-#define DEBUG
-#define DEVEL
+//#define DEBUG
+//#define DEVEL
 
 // LCD: use the HD447890 library and Wire i2c library
 //#define SDA 0
@@ -61,14 +61,14 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.4";
+const char VERSION[]  = "3.4.1";
 
 // OTA
 int otaProgress       = 0;
 int otaPort           = 8266;
 
 // LCD
-#define             WIRECLOCK     400000L   // tell hd44780 to use 400kHz i2c clock rate
+//#define             WIRECLOCK     400000L   // tell hd44780 to use 400kHz i2c clock rate
 hd44780_I2Cexp      lcd;                    // auto locate and autoconfig interface pins
 #define             HD44780_LCDOBJECT       // tell the hd44780 sketch the lcd object has been declared
 const int           LCD_COLS      = 20;     // LCD columns
@@ -705,8 +705,8 @@ bool lcdShowSensor(int sensor) {
       lcdLgPrint(text, cols);
     }
     else if (sensor == SNS_OHM) {
-      sprintf(text, "% 3d%%", snsReport[sensor][0]);
-      byte cols[] = {4, 8, 12, 16};
+      sprintf(text, "% 4d%%", snsReport[sensor][0]);
+      byte cols[] = {0, 4, 8, 12, 16};
 #if defined(DEBUG)
       Serial.print("SCR_OHM ");
       Serial.println(text);
@@ -1046,8 +1046,9 @@ void wxProcess(const char *report, char *message) {
       strncpy(wxReport[idxReport][1], sep + 2, LCD_COLS);
       wxReport[idxReport][1][LCD_COLS] = '\0';
       // The 'tod' and 'ton' reports are mutually exclusive
-      if      (idxReport == WX_TOD) wxClear(WX_TON);
-      else if (idxReport == WX_TON) wxClear(WX_TOD);
+      // FIXME
+      //if      (idxReport == WX_TOD) wxClear(WX_TON);
+      //else if (idxReport == WX_TON) wxClear(WX_TOD);
     }
   }
 }
