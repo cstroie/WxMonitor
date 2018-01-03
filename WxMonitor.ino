@@ -20,8 +20,8 @@
 */
 
 // The DEBUG flag
-//#define DEBUG
-//#define DEVEL
+#define DEBUG
+#define DEVEL
 
 // LCD: use the HD447890 library and Wire i2c library
 //#define SDA 0
@@ -61,7 +61,7 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.4.1";
+const char VERSION[]  = "3.5.1";
 
 // OTA
 int otaProgress       = 0;
@@ -146,7 +146,7 @@ bool                dhtOK         = false;        // The temperature/humidity se
 bool                dhtDrop       = true;         // Always drop the first reading
 const unsigned long snsDelay      = 60000UL;      // Delay between sensor readings
 unsigned long       snsNextTime   = 0UL;          // Next time to read the sensors
-const int           pinDHT        = D4;           // Temperature/humidity sensor input pin
+const int           pinDHT        = D2;           // Temperature/humidity sensor input pin
 // Sensors
 enum                SNS_KEYS      {SNS_ITP, SNS_IHM, SNS_OTP, SNS_OHM, SNS_ODP, SNS_OPS, SNS_ALL};
 int                 snsReport[SNS_ALL][2];        // Sensors storage
@@ -156,16 +156,16 @@ ADC_MODE(ADC_VCC);
 
 // RC Switch
 RCSwitch            rcs           = RCSwitch();   // Radio Command
-const int           pinRCS        = D3;           // RCS output pin
+const int           pinRCS        = D6;           // RCS output pin
 const char          rcsHomeCode[] = "11111";      // The HOME code of your RC remote/receivers
 
 // Beep
-const int           pinBeep       = D6 ;          // Beep output pin
+const int           pinBeep       = D5 ;          // Beep output pin
 
 // PIR
 const unsigned long pirDelay      = 300000UL;     // Delay after that the light is closed
 unsigned long       pirNextTime   = 0UL;          // Next time to close the light
-const int           pinPIR        = D5;
+const int           pinPIR        = D1;
 
 
 // Character transformation
@@ -984,6 +984,8 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   if (pBranch != NULL)
     *pBranch++ = '\0';
 
+  yield();
+
   // Dispatcher
   if (strcmp(pRoot, "wx") == 0 and strcmp(pTrunk, wxStation) == 0)
     wxProcess(pBranch, message);
@@ -1015,6 +1017,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
       }
     }
   }
+  yield();
 }
 
 /**
@@ -1174,6 +1177,11 @@ void setup() {
   Serial.print(F(" "));
   Serial.println(__DATE__);
 
+  pinMode(D5, OUTPUT);
+  digitalWrite(D5, HIGH);
+  delay(50);
+  digitalWrite(D5, LOW);
+
   // Configure the RCS pin
   rcs.enableTransmit(pinRCS);
 
@@ -1182,6 +1190,8 @@ void setup() {
 
   // Set the host name
   WiFi.hostname(NODENAME);
+  // Store credentials only if changed
+  //WiFi.persistent(false);
   // Try to connect to WiFi
   WiFiManager wifiManager;
   wifiManager.setTimeout(300);
