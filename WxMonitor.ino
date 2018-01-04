@@ -20,12 +20,12 @@
 */
 
 // The DEBUG flag
-#define DEBUG
-#define DEVEL
+//#define DEBUG
+//#define DEVEL
 
 // LCD: use the HD447890 library and Wire i2c library
-//#define SDA 0
-//#define SCL 2
+#define SDA 0
+#define SCL 2
 #include <Wire.h>
 #include <hd44780.h>
 #include <hd44780ioClass/hd44780_I2Cexp.h> // include i/o class header
@@ -113,7 +113,7 @@ const int     ntpPort               = 123;                    // NTP port
 unsigned long ntpNextSync           = 0UL;                    // Next time to syncronize
 unsigned long ntpDelta              = 0UL;                    // Difference between real time and internal clock
 bool          ntpOk                 = false;                  // Flag to know the time is accurate
-const int     ntpTZ                 = 3;                      // Time zone
+const int     ntpTZ                 = 2;                      // Time zone
 
 // Wx
 const char    wxStation[]           = "ROXX0003";
@@ -1176,6 +1176,11 @@ void setup() {
   Serial.print(NODENAME);
   Serial.print(F(" "));
   Serial.println(__DATE__);
+
+  // For I2C, the ESP8266-1 module uses the pin 0 for SDA and 2 for SCL
+#if defined(ARDUINO_ARCH_ESP8266)
+  Wire.pins(SDA, SCL);
+#endif
 
   pinMode(D5, OUTPUT);
   digitalWrite(D5, HIGH);
