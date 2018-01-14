@@ -49,9 +49,6 @@
 // DHT11 sensor
 #include <SimpleDHT.h>
 
-// RC Switch
-#include <RCSwitch.h>
-
 
 // Device name
 #if defined(DEBUG)
@@ -61,7 +58,7 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.5.1";
+const char VERSION[]  = "3.5.2";
 
 // OTA
 int otaProgress       = 0;
@@ -153,11 +150,6 @@ int                 snsReport[SNS_ALL][2];        // Sensors storage
 const int           snsTTL        = 600;          // Sensors readings time to live (seconds)
 // Set ADC to Voltage
 ADC_MODE(ADC_VCC);
-
-// RC Switch
-RCSwitch            rcs           = RCSwitch();   // Radio Command
-const int           pinRCS        = D6;           // RCS output pin
-const char          rcsHomeCode[] = "11111";      // The HOME code of your RC remote/receivers
 
 // Beep
 const int           pinBeep       = D5 ;          // Beep output pin
@@ -945,7 +937,6 @@ boolean mqttReconnect() {
     mqttPubRet(ipbuf, buf, "gw");
     // Subscribe
     mqttSubscribeAll(mqttTopicCmd, nodename);   // Subscribe to command topic
-    mqttSubscribeAll(mqttTopicCmd, "rcs");      // Subscribe to RCS command topic
     mqttSubscribeAll(mqttTopicWx,  wxStation);  // Subscribe to weather topic
     mqttSubscribeAll(mqttTopicSns, "outdoor");  // Subscribe to outdoor sensors topic
 
@@ -992,9 +983,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   else if (strcmp(pRoot, "sensor") == 0 and strcmp(pTrunk, "outdoor") == 0)
     snsProcess(pBranch, message);
   else if (strcmp(pRoot, "command") == 0) {
-    if (strcmp(pTrunk, "rcs") == 0)
-      rcsProcess(pBranch, message);
-    else if (strcmp(pTrunk, nodename) == 0) {
+    if (strcmp(pTrunk, nodename) == 0) {
       if (strcmp(pBranch, "restart") == 0)
         ESP.restart();
       else if (strcmp(pBranch, "beep") == 0) {
@@ -1092,24 +1081,6 @@ void snsProcess(const char *sensor, char *message) {
   }
 }
 
-void rcsProcess(const char *button, char *message) {
-  char command[][6] = {"10000", "01000", "00100", "00010", "00001"};
-  char btn = toupper((unsigned char) button[0]);
-  // Uppercase
-  while (*message) {
-    *message = toupper((unsigned char) * message);
-    message++;
-  }
-
-  // Valid buttons are A..E
-  if (btn >= 'A' and btn <= 'E') {
-    if (strncmp(message, "ON", 2) == 0)
-      rcs.switchOn(rcsHomeCode, command[btn - 'A']);
-    else if (strncmp(message, "OFF", 3) == 0)
-      rcs.switchOff(rcsHomeCode, command[btn - 'A']);
-  }
-}
-
 /**
   Read the DHT11 sensor
 
@@ -1186,9 +1157,6 @@ void setup() {
   digitalWrite(D5, HIGH);
   delay(50);
   digitalWrite(D5, LOW);
-
-  // Configure the RCS pin
-  rcs.enableTransmit(pinRCS);
 
   // LCD init
   lcdInit();
@@ -1331,9 +1299,9 @@ void loop() {
       // Compose and publish the telemetry
       char text[8] = "";
       snprintf_P(text, sizeof(text), PSTR("%d"), snsReport[SNS_ITP][0]);
-      mqttPub(text, mqttTopicSns, "indoor", "temperature");
+      mqttPubRet(text, mqttTopicSns, "indoor", "temperature");
       snprintf_P(text, sizeof(text), PSTR("%d"), snsReport[SNS_IHM][0]);
-      mqttPub(text, mqttTopicSns, "indoor", "humidity");
+      mqttPubRet(text, mqttTopicSns, "indoor", "humidity");
     }
     else
       dhtOK = false;
