@@ -58,7 +58,7 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.5.2";
+const char VERSION[]  = "3.5.3";
 
 // OTA
 int otaProgress       = 0;
@@ -1143,7 +1143,7 @@ void wifiCallback (WiFiManager *wifiMgr) {
 /**
   Try to connect to WiFi
 */
-void wifiConnect() {
+void wifiConnect(int timeout = 300) {
   // Set the host name
   WiFi.hostname(NODENAME);
   // Try to connect to WiFi
@@ -1157,7 +1157,7 @@ void wifiConnect() {
   Serial.println(F(" done."));
 #else
   WiFiManager wifiManager;
-  wifiManager.setTimeout(300);
+  wifiManager.setTimeout(timeout);
   wifiManager.setAPCallback(wifiCallback);
   while (!wifiManager.autoConnect(NODENAME)) {
     // TODO
@@ -1279,7 +1279,7 @@ void setup() {
 
 void loop() {
   // Make sure we are connected
-  if (!WiFi.isConnected()) wifiConnect();
+  if (!WiFi.isConnected()) wifiConnect(60);
 
   // OTA
   ArduinoOTA.handle();
