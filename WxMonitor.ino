@@ -1,7 +1,7 @@
 /**
   WxMonitor - Weather Monitor
 
-  Copyright 2017 Costin STROIE <costinstroie@eridu.eu.org>
+  Copyright 2017-2018 Costin STROIE <costinstroie@eridu.eu.org>
 
   This file is part of Weather Station.
 
@@ -1140,6 +1140,36 @@ void wifiCallback (WiFiManager *wifiMgr) {
   lcd.print(strMsg.c_str());
 }
 
+/**
+  Try to connect to WiFi
+*/
+void wifiConnect() {
+  // Set the host name
+  WiFi.hostname(NODENAME);
+  // Try to connect to WiFi
+#ifdef WIFI_SSID
+  Serial.print(F("WiFi connecting "));
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (!WiFi.isConnected()) {
+    Serial.print(".");
+    delay(1000);
+  };
+  Serial.println(F(" done."));
+#else
+  WiFiManager wifiManager;
+  wifiManager.setTimeout(300);
+  wifiManager.setAPCallback(wifiCallback);
+  while (!wifiManager.autoConnect(NODENAME)) {
+    // TODO
+    String strMsg = "No WiFi network ";
+    Serial.println(strMsg);
+    lcd.setCursor(0, 1);
+    lcd.print(strMsg.c_str());
+    delay(1000);
+  }
+#endif
+}
+
 void setup() {
   // Init the serial interface
   Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
@@ -1161,23 +1191,8 @@ void setup() {
   // LCD init
   lcdInit();
 
-  // Set the host name
-  WiFi.hostname(NODENAME);
-  // Store credentials only if changed
-  //WiFi.persistent(false);
-  // Try to connect to WiFi
-  WiFiManager wifiManager;
-  wifiManager.setTimeout(300);
-  wifiManager.setAPCallback(wifiCallback);
-  while (!wifiManager.autoConnect(NODENAME)) {
-    // TODO
-    String strMsg = "No WiFi network ";
-    Serial.println(strMsg);
-    lcd.setCursor(0, 1);
-    lcd.print(strMsg.c_str());
-    delay(1000);
-  }
-
+  // Try to connect
+  wifiConnect();
   // Connected
   lcdShowWiFi(true);
 
@@ -1190,7 +1205,7 @@ void setup() {
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("OTA");
-    lcd.setCursor(LCD_COLS - 12, 0);
+    lcd.setCursor(LCD_COLS - 13, 0);
     lcd.print("[");
     lcd.setCursor(LCD_COLS - 1, 0);
     lcd.print("]");
@@ -1263,6 +1278,9 @@ void setup() {
 }
 
 void loop() {
+  // Make sure we are connected
+  if (!WiFi.isConnected()) wifiConnect();
+
   // OTA
   ArduinoOTA.handle();
   yield();
