@@ -1278,9 +1278,6 @@ void setup() {
 }
 
 void loop() {
-  // Make sure we are connected
-  if (!WiFi.isConnected()) wifiConnect(60);
-
   // OTA
   ArduinoOTA.handle();
   yield();
