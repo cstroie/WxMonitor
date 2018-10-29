@@ -1,27 +1,33 @@
 /**
   WxMonitor - Weather Monitor
 
-  Copyright 2017-2018 Costin STROIE <costinstroie@eridu.eu.org>
+  Copyright (c) 2017-2018 Costin STROIE <costinstroie@eridu.eu.org>
 
-  This file is part of Weather Station.
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, orl
+  (at your option) any later version.
 
-  WxMon is free software: you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by the Free
-  Software Foundation, either version 3 of the License, or (at your option) any
-  later version.
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
 
-  WxMon is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  WxMon.  If not, see <http://www.gnu.org/licenses/>.
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 // The DEBUG flag
 //#define DEBUG
 //#define DEVEL
+
+// Secure connections
+#define USE_SSL
+#define USE_MQTT_SSL
+
+// NTP
+#define NTP_SERVER    "europe.pool.ntp.org"
+#define NTP_TZ        +2
 
 // LCD: use the HD447890 library and Wire i2c library
 #define SDA 0
@@ -32,13 +38,19 @@
 
 // WiFi
 #include <ESP8266WiFi.h>
+#ifdef USE_SSL
+#include <WiFiClientSecure.h>
+#else
+#include <WiFiClient.h>
+#endif
 #include <WiFiManager.h>
 #include <WiFiUdp.h>
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 
-// NTP
-//#include <TimeLib.h>
+// Network Time Protocol
+#include "ntp.h"
+NTP ntp;
 
 // Timer
 #include <AsyncDelay.h>
@@ -58,7 +70,7 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.5.3";
+const char VERSION[]  = "3.6.1";
 
 // OTA
 int otaProgress       = 0;
@@ -102,16 +114,6 @@ const uint8_t lcdLgNumShapes[] PROGMEM = {
   B00000, B11111, B11111, B11111, B00000, B00000, B11000, B00000,
 };
 
-
-// Time synchronization and time keeping
-WiFiUDP       ntpClient;                                      // NTP UDP client
-const char    ntpServer[] PROGMEM   = "europe.pool.ntp.org";  // NTP server to connect to (RFC5905)
-const int     ntpPort               = 123;                    // NTP port
-unsigned long ntpNextSync           = 0UL;                    // Next time to syncronize
-unsigned long ntpDelta              = 0UL;                    // Difference between real time and internal clock
-bool          ntpOk                 = false;                  // Flag to know the time is accurate
-const int     ntpTZ                 = 2;                      // Time zone
-
 // Wx
 const char    wxStation[]           = "ROXX0003";
 enum          WX_KEYS               {WX_NOW, WX_TOD, WX_TON, WX_TOM, WX_DAT, WX_SUN, WX_MON, WX_BAR, WX_ALL};
@@ -119,18 +121,25 @@ char          wxRepKeys[][4]        = {"now", "tod", "ton", "tom", "dat", "sun",
 char          wxReport[WX_ALL][2][LCD_COLS];                  // Weather storage
 
 // MQTT parameters
-// TODO FPSTR()
-WiFiClient WiFi_Client;                                       // WiFi TCP client for MQTT
-PubSubClient mqttClient(WiFi_Client);                         // MQTT client, based on WiFi client
-#ifdef DEBUG
-const char          mqttId[]       = "devnode-eridu-eu-org";  // Development MQTT client ID
+#ifdef USE_MQTT_SSL
+WiFiClientSecure    wifiClient;                                 // Secure WiFi TCP client for MQTT
 #else
-const char          mqttId[]       = "wxmon-eridu-eu-org";    // Production MQTT client ID
+WiFiClient          wifiClient;                                 // Plain WiFi TCP client for MQTT
 #endif
-const char          mqttServer[]   = "eridu.eu.org";          // MQTT server address to connect to
-const int           mqttPort       = 1883;                    // MQTT port
-const unsigned long mqttDelay      = 5000UL;                  // Delay between reconnection attempts
-unsigned long       mqttNextTime   = 0UL;                     // Next time to reconnect
+PubSubClient        mqttClient(wifiClient);                     // MQTT client, based on WiFi client
+#ifdef DEVEL
+const char          mqttId[]       = "wxmon-dev-eridu-eu-org";  // Development MQTT client ID
+#else
+const char          mqttId[]       = "wxmon-eridu-eu-org";      // Production MQTT client ID
+#endif
+const char          mqttServer[]   = "eridu.eu.org";            // MQTT server address to connect to
+#ifdef USE_MQTT_SSL
+const int           mqttPort       = 8883;                      // Secure MQTT port
+#else
+const int           mqttPort       = 1883;                      // Plain MQTT port
+#endif
+const unsigned long mqttDelay      = 5000UL;                    // Delay between reconnection attempts
+unsigned long       mqttNextTime   = 0UL;                       // Next time to reconnect
 // Various MQTT topics
 const char          mqttTopicWx[]  = "wx";
 const char          mqttTopicCmd[] = "command";
@@ -148,6 +157,7 @@ const int           pinDHT        = D2;           // Temperature/humidity sensor
 enum                SNS_KEYS      {SNS_ITP, SNS_IHM, SNS_OTP, SNS_OHM, SNS_ODP, SNS_OPS, SNS_ALL};
 int                 snsReport[SNS_ALL][2];        // Sensors storage
 const int           snsTTL        = 600;          // Sensors readings time to live (seconds)
+
 // Set ADC to Voltage
 ADC_MODE(ADC_VCC);
 
@@ -159,14 +169,10 @@ const unsigned long pirDelay      = 300000UL;     // Delay after that the light 
 unsigned long       pirNextTime   = 0UL;          // Next time to close the light
 const int           pinPIR        = D1;
 
-
 // Character transformation
 const char chrUtfDeg[] = {194, 176, 0};
 const char chrWinDeg[] = {176, 0};
 const char chrLcdDeg[] = {223, 0};
-
-
-
 
 
 /**
@@ -191,117 +197,6 @@ void strrpl(char string[], const char *search, const char *replace) {
 char charIP(const IPAddress ip, char *buf, size_t len, boolean pad = false) {
   if (pad) snprintf_P(buf, len, PSTR("%3d.%3d.%3d.%3d"), ip[0], ip[1], ip[2], ip[3]);
   else     snprintf_P(buf, len, PSTR("%d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
-}
-
-/**
-  Get current time as UNIX time (1970 epoch)
-
-  @param sync flag to show whether network sync is to be performed
-  @return current UNIX time
-*/
-unsigned long timeUNIX(bool sync = true) {
-  // Check if we need to sync
-  if (millis() >= ntpNextSync and sync) {
-    // Try to get the time from Internet
-    unsigned long utm = ntpSync();
-    if (utm == 0) {
-      // Time sync has failed, sync again over one minute
-      ntpNextSync += 1UL * 60 * 1000;
-      ntpOk = false;
-      // Try to get old time from eeprom, if time delta is zero
-    }
-    else {
-      // Compute the new time delta
-      ntpDelta = utm - (millis() / 1000);
-      // Time sync has succeeded, sync again in 8 hours
-      ntpNextSync += 8UL * 60 * 60 * 1000;
-      ntpOk = true;
-      Serial.print(F("Network UNIX Time: 0x"));
-      Serial.println(utm, 16);
-    }
-  }
-  // Get current time based on uptime and time delta,
-  // or just uptime for no time sync ever
-  return (millis() / 1000) + ntpDelta + ntpTZ * 3600;
-}
-
-/**
-  © Francesco Potortì 2013 - GPLv3 - Revision: 1.13
-
-  Send an NTP packet and wait for the response, return the Unix time
-
-  To lower the memory footprint, no buffers are allocated for sending
-  and receiving the NTP packets.  Four bytes of memory are allocated
-  for transmision, the rest is random garbage collected from the data
-  memory segment, and the received packet is read one byte at a time.
-  The Unix time is returned, that is, seconds from 1970-01-01T00:00.
-*/
-unsigned long ntpSync() {
-  // Open socket on arbitrary port
-  bool ntpOk = ntpClient.begin(12321);
-  // NTP request header: Only the first four bytes of an outgoing
-  // packet need to be set appropriately, the rest can be whatever.
-  const long ntpFirstFourBytes = 0xEC0600E3;
-  // Fail if UDP could not init a socket
-  if (!ntpOk) return 0UL;
-  // Clear received data from possible stray received packets
-  ntpClient.flush();
-  // Send an NTP request
-  char ntpServerBuf[strlen_P((char*)ntpServer) + 1];
-  strncpy_P(ntpServerBuf, (char*)ntpServer, sizeof(ntpServerBuf));
-  if (!(ntpClient.beginPacket(ntpServerBuf, ntpPort) &&
-        ntpClient.write((byte *)&ntpFirstFourBytes, 48) == 48 &&
-        ntpClient.endPacket()))
-    return 0UL;                             // sending request failed
-  // Wait for response; check every pollIntv ms up to maxPoll times
-  const int pollIntv = 150;                 // poll every this many ms
-  const byte maxPoll = 15;                  // poll up to this many times
-  int pktLen;                               // received packet length
-  for (byte i = 0; i < maxPoll; i++) {
-    if ((pktLen = ntpClient.parsePacket()) == 48) break;
-    delay(pollIntv);
-  }
-  if (pktLen != 48) return 0UL;             // no correct packet received
-  // Read and discard the first useless bytes (32 for speed, 40 for accuracy)
-  for (byte i = 0; i < 40; ++i) ntpClient.read();
-  // Read the integer part of sending time
-  unsigned long ntpTime = ntpClient.read(); // NTP time
-  for (byte i = 1; i < 4; i++)
-    ntpTime = ntpTime << 8 | ntpClient.read();
-  // Round to the nearest second if we want accuracy
-  // The fractionary part is the next byte divided by 256: if it is
-  // greater than 500ms we round to the next second; we also account
-  // for an assumed network delay of 50ms, and (0.5-0.05)*256=115;
-  // additionally, we account for how much we delayed reading the packet
-  // since its arrival, which we assume on average to be pollIntv/2.
-  ntpTime += (ntpClient.read() > 115 - pollIntv / 8);
-  // Discard the rest of the packet
-  ntpClient.flush();
-  return ntpTime - 2208988800UL;            // convert to Unix time
-}
-
-/**
-  Get the uptime
-
-  @param buf character array to return the text to
-  @param len the maximum length of the character array
-  @return uptime in seconds
-*/
-unsigned long uptime(char *buf, size_t len) {
-  // Get the uptime in seconds
-  unsigned long upt = millis() / 1000;
-  // Compute hours, minutes and seconds
-  int ss =  upt % 60;
-  //upt -= ss;
-  int mm = (upt % 3600) / 60;
-  //upt -= mm * 60;
-  int hh = (upt % 86400L) / 3600;
-  //upt -= hh * 3600;
-  int dd =  upt / 86400L;
-  // Create the formatted time
-  snprintf_P(buf, len, PSTR("%d days, %02d:%02d:%02d"), dd, hh, mm, ss);
-  // Return the uptime in seconds
-  return upt;
 }
 
 /**
@@ -507,14 +402,14 @@ void lcdLgPrint(const char *text, const byte *cols, byte row = 0, int type = LCD
 */
 bool lcdShowTime() {
   char buf[8] = "";
-  // Get the time, but do not open a connection to server
-  unsigned long utm = timeUNIX(false);
-  // Compute hour, minute and second
-  int hh = (utm % 86400L) / 3600;
-  int mm = (utm % 3600) / 60;
-  //int ss =  utm % 60;
+  // Get the date and time
+  unsigned long utm = ntp.getSeconds();
+  datetime_t dt = ntp.getDateTime(utm);
+  // Check for DST and compute again if needed
+  if (ntp.dstCheck(dt.yy, dt.ll, dt.dd, dt.hh))
+    dt = ntp.getDateTime(utm + 3600);
   // Create the formatted time
-  snprintf_P(buf, sizeof(buf), PSTR("%02d:%02d"), hh, mm);
+  snprintf_P(buf, sizeof(buf), PSTR("%02d:%02d"), dt.hh, dt.mm);
   // Define the columns
   byte cols[] = {2, 6, 10, 12, 16};
 #ifdef DEBUG
@@ -941,7 +836,9 @@ boolean mqttReconnect() {
     mqttSubscribeAll(mqttTopicSns, "outdoor");  // Subscribe to outdoor sensors topic
 
     Serial.print(F("MQTT connected to "));
-    Serial.println(mqttServer);
+    Serial.print(mqttServer);
+    Serial.print(F(" port "));
+    Serial.println(mqttPort);
   }
   yield();
   return mqttClient.connected();
@@ -1247,9 +1144,9 @@ void setup() {
   Serial.println(F("OTA Ready"));
 #endif
 
-  // Start time sync
-  timeUNIX();
-  yield();
+  // Configure NTP
+  ntp.init(NTP_SERVER);
+  ntp.setTZ(NTP_TZ);
 
   // Start the MQTT client
   mqttClient.setServer(mqttServer, mqttPort);
@@ -1331,7 +1228,7 @@ void loop() {
     // Uptime
     char upt[32] = "";
     unsigned long ups = 0;
-    ups = uptime(upt, sizeof(upt));
+    ups = ntp.getUptime(upt, sizeof(upt));
     snprintf_P(buf, sizeof(buf), PSTR("%d"), ups);
     mqttPubRet(buf, topic, "uptime");
     mqttPubRet(upt, topic, "uptime", "text");
