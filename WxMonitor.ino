@@ -19,11 +19,9 @@
 
 // The DEBUG flag
 //#define DEBUG
-//#define DEVEL
 
-// Secure connections
-#define USE_SSL
-#define USE_MQTT_SSL
+// User settings
+#include "config.h"
 
 // NTP
 #define NTP_SERVER    "europe.pool.ntp.org"
@@ -70,7 +68,7 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.6.1";
+const char VERSION[]  = "3.6.2";
 
 // OTA
 int otaProgress       = 0;
@@ -1102,7 +1100,7 @@ void setup() {
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("OTA");
-    lcd.setCursor(LCD_COLS - 13, 0);
+    lcd.setCursor(LCD_COLS - 12, 0);
     lcd.print("[");
     lcd.setCursor(LCD_COLS - 1, 0);
     lcd.print("]");
