@@ -50,9 +50,6 @@
 #include "ntp.h"
 NTP ntp;
 
-// Timer
-#include <AsyncDelay.h>
-
 // MQTT
 #include <PubSubClient.h>
 
@@ -68,7 +65,7 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.6.2";
+const char VERSION[]  = "3.6.3";
 
 // OTA
 int otaProgress       = 0;
@@ -111,6 +108,30 @@ const uint8_t lcdLgNumShapes[] PROGMEM = {
   B00000, B11111, B01111, B11110, B00000, B00000, B11110, B00000,
   B00000, B11111, B11111, B11111, B00000, B00000, B11000, B00000,
 };
+
+// Large numbers and symbols
+const static byte lgNum0[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05}; // '0'
+const static byte lgNum1[] PROGMEM = {0x01, 0x03, 0x20,  0x20, 0xff, 0x20,  0x20, 0xff, 0x20,  0x00, 0x00, 0x00}; // '1'
+const static byte lgNum2[] PROGMEM = {0x02, 0x01, 0x03,  0x02, 0x01, 0xff,  0xff, 0x20, 0x20,  0x04, 0x00, 0x00}; // '2'
+const static byte lgNum3[] PROGMEM = {0x02, 0x01, 0x03,  0x20, 0x01, 0xff,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05}; // '3'
+const static byte lgNum4[] PROGMEM = {0x01, 0x20, 0x20,  0xff, 0x01, 0xff,  0x20, 0x20, 0xff,  0x20, 0x20, 0x05}; // '4'
+const static byte lgNum5[] PROGMEM = {0x01, 0x01, 0x01,  0xff, 0x01, 0x03,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05}; // '5'
+const static byte lgNum6[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05}; // '6'
+const static byte lgNum7[] PROGMEM = {0x01, 0x01, 0x01,  0x20, 0x02, 0xff,  0x20, 0xff, 0x20,  0x20, 0x00, 0x20}; // '7'
+const static byte lgNum8[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x01, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05}; // '8'
+const static byte lgNum9[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0xff,  0x20, 0x20, 0x05}; // '9'
+const static byte lgNumC[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0x00,  0xff, 0x20, 0x01,  0x04, 0x00, 0x05}; // 'C'
+const static byte lgNumc[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0x20,  0x04, 0x00, 0x05,  0x20, 0x20, 0x20}; // 'c'
+const static byte lgNumM[] PROGMEM = {0x20, 0x20, 0x20,  0x20, 0x01, 0x01,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20}; // '-'
+const static byte lgNumS[] PROGMEM = {0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20}; // ' '
+const static byte lgNumN[] PROGMEM = {0x20,  0x07,  0x07,  0x20};                                                 // ':'
+const static byte lgNumD[] PROGMEM = {0x20,  0x20,  0x20,  0x07};                                                 // '.'
+const static byte lgNumG[] PROGMEM = {0x07,  0x20,  0x20,  0x20};                                                 // '''
+const static byte lgNumP[] PROGMEM = {0x07, 0x20, 0x02,  0x02, 0x06, 0x05,  0x05, 0x20, 0x07,  0x20, 0x20, 0x20}; // '%'
+const byte* const lgNum[]  PROGMEM = {lgNum0, lgNum1, lgNum2, lgNum3, lgNum4, lgNum5, lgNum6, lgNum7, lgNum8, lgNum9,
+                                      lgNumC, lgNumc, lgNumM, lgNumS, lgNumN, lgNumD, lgNumG, lgNumP
+                                     };
+const char lgNumChars[]             = "0123456789Cc- :.'%";
 
 // Wx
 const char    wxStation[]           = "ROXX0003";
@@ -172,7 +193,6 @@ const char chrUtfDeg[] = {194, 176, 0};
 const char chrWinDeg[] = {176, 0};
 const char chrLcdDeg[] = {223, 0};
 
-
 /**
   Replace a substring
 */
@@ -186,6 +206,7 @@ void strrpl(char string[], const char *search, const char *replace) {
     strcat(buffer, p + strlen(search));
     strcpy(string, buffer);
     p++;
+    yield();
   }
 }
 
@@ -194,7 +215,7 @@ void strrpl(char string[], const char *search, const char *replace) {
 */
 char charIP(const IPAddress ip, char *buf, size_t len, boolean pad = false) {
   if (pad) snprintf_P(buf, len, PSTR("%3d.%3d.%3d.%3d"), ip[0], ip[1], ip[2], ip[3]);
-  else     snprintf_P(buf, len, PSTR("%d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
+  else     snprintf_P(buf, len, PSTR("%d.%d.%d.%d"),     ip[0], ip[1], ip[2], ip[3]);
 }
 
 /**
@@ -207,7 +228,7 @@ void lcdInit() {
 }
 
 /**
-  LCD display the logo "Wx Monitor"
+  LCD display the logo "Wx Monitor" and version
 */
 void lcdLogo() {
   const static byte lcdLogoText[] PROGMEM = {0x00, 0x01, 0x20, 0x02, 0x03, 0x04, 0x05, 0x06, 0x03, 0x07};
@@ -243,6 +264,7 @@ void lcdDefChars(int lcdCharsType) {
       lcdChars = lcdCharsType;
       break;
     case LCD_LGNUM:
+    default:
       lcdDefBig(lcdLgNumShapes);
       lcdChars = lcdCharsType;
       break;
@@ -250,16 +272,17 @@ void lcdDefChars(int lcdCharsType) {
 }
 
 /**
-  Copy the source shape to destination shape and return the length divided by 4
+  Copy the source shape to destination shape and
+  return the length divided by 4 (i.e. number of columns)
 
   @param dst the destination array
   @param src the source array
   @param len the length of the source array
   @return the number of columns (half the length of the source array)
 */
-byte copyLgShape(byte *dst, const byte *src, size_t len) {
+byte copyLgShape(byte * dst, const byte * src, size_t len) {
   memcpy_P(dst, src, len);
-  return len >> 2;
+  return len / 4;
 }
 
 /**
@@ -269,101 +292,25 @@ byte copyLgShape(byte *dst, const byte *src, size_t len) {
   @param charShapes array of needed character shapes
   @return the number of display columns the character uses
 */
-byte lcdLgConstruct(char chr, byte *charShapes) {
-  byte charCols = 0;
-  switch (chr) {
-    case '0': {
-        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '1': {
-        const static byte tmpShapes[] PROGMEM = {0x01, 0x03, 0x20,  0x20, 0xff, 0x20,  0x20, 0xff, 0x20,  0x00, 0x00, 0x00};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '2': {
-        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0x02, 0x01, 0xff,  0xff, 0x20, 0x20,  0x04, 0x00, 0x00};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '3': {
-        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0x20, 0x01, 0xff,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '4': {
-        const static byte tmpShapes[] PROGMEM = {0x01, 0x20, 0x20,  0xff, 0x01, 0xff,  0x20, 0x20, 0xff,  0x20, 0x20, 0x05};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '5': {
-        const static byte tmpShapes[] PROGMEM = {0x01, 0x01, 0x01,  0xff, 0x01, 0x03,  0x20, 0x20, 0xff,  0x00, 0x00, 0x05};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '6': {
-        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '7': {
-        const static byte tmpShapes[] PROGMEM = {0x01, 0x01, 0x01,  0x20, 0x02, 0xff,  0x20, 0xff, 0x20,  0x20, 0x00, 0x20};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '8': {
-        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x01, 0xff,  0xff, 0x20, 0xff,  0x04, 0x00, 0x05};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '9': {
-        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0xff,  0x04, 0x00, 0xff,  0x20, 0x20, 0x05};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case 'C': {
-        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0x00,  0xff, 0x20, 0x01,  0x04, 0x00, 0x05};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case 'c': {
-        const static byte tmpShapes[] PROGMEM = {0x02, 0x01, 0x03,  0xff, 0x20, 0x20,  0x04, 0x00, 0x05,  0x20, 0x20, 0x20};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '-': {
-        const static byte tmpShapes[] PROGMEM = {0x20, 0x20, 0x20,  0x20, 0x01, 0x01,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case ' ': {
-        const static byte tmpShapes[] PROGMEM = {0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20,  0x20, 0x20, 0x20};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case ':': {
-        const static byte tmpShapes[] PROGMEM = {0x20,  0x07,  0x07,  0x20};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '.': {
-        const static byte tmpShapes[] PROGMEM = {0x20,  0x20,  0x20,  0x07};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '\'': {
-        const static byte tmpShapes[] PROGMEM = {0x07,  0x20,  0x20,  0x20};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
-      break;
-    case '%': {
-        const static byte tmpShapes[] PROGMEM = {0x07, 0x20, 0x02,  0x02, 0x06, 0x05,  0x05, 0x20, 0x07,  0x20, 0x20, 0x20};
-        charCols = copyLgShape(charShapes, tmpShapes, sizeof(tmpShapes));
-      }
+byte lcdLgConstruct(char chr, byte * charShapes) {
+  byte charCols = 3;
+  byte idx;
+
+  // Find the character
+  for (idx = 0; idx < 255; idx++) {
+    if (lgNumChars[idx] == '\0')
+      idx = 255;
+    else if (lgNumChars[idx] == chr)
       break;
   }
-  return charCols;
+
+  // FIXME
+  if (idx >= 14 and idx <= 16)
+    charCols = 1;
+  else
+    charCols = 3;
+
+  return copyLgShape(charShapes, lgNum[idx], charCols * 4);
 }
 
 /**
@@ -389,7 +336,7 @@ void lcdLgWrite(char chr, byte col, byte row = 0) {
   @param cols the columns to write each character
   @param type the character type to use
 */
-void lcdLgPrint(const char *text, const byte *cols, byte row = 0, int type = LCD_LGNUM) {
+void lcdLgPrint(const char *text, const byte * cols, byte row = 0, int type = LCD_LGNUM) {
   if (lcdChars != type) lcdDefChars(type);
   for (int i = 0; i <= sizeof(text); i++)
     lcdLgWrite(text[i], cols[i]);
@@ -731,7 +678,7 @@ void lcdRotateScreens() {
   @param payload the MQTT message to send to topic
   @return the publishig status
 */
-boolean mqttPubRetain(const String &topic, const String &payload) {
+boolean mqttPubRetain(const String & topic, const String & payload) {
   yield();
   return mqttClient.publish(topic.c_str(), payload.c_str(), true);
 }
@@ -743,7 +690,7 @@ boolean mqttPubRetain(const String &topic, const String &payload) {
   @param payload the MQTT message to send to topic
   @return the publishig status
 */
-boolean mqttPub(const String &topic, const String &payload) {
+boolean mqttPub(const String & topic, const String & payload) {
   yield();
   return mqttClient.publish(topic.c_str(), payload.c_str(), false);
 }
@@ -849,7 +796,7 @@ boolean mqttReconnect() {
   @param payload the message payload (byte array)
   @param length the length of the message payload (unsigned int)
 */
-void mqttCallback(char *topic, byte *payload, unsigned int length) {
+void mqttCallback(char *topic, byte * payload, unsigned int length) {
   // Make a limited copy of the payload and make sure it ends with \0
   char message[100];
   if (length > 100) length = 100;
@@ -1005,28 +952,9 @@ bool dhtRead(int *temp, int *hmdt, bool drop = false) {
 }
 
 /**
-  On motion detection, turn the backlight on and display the first screen
-*/
-void pirInterrupt() {
-  // Do not reset the screens on subsequent movements
-  if (millis() >= pirNextTime) {
-    lcd.backlight();
-    lcdLight = true;
-    lcdIndex = 0;
-    lcdRotateScreens();
-    // TODO MQTT motion detection
-  }
-  // Set again the timer to disable the backlight
-  pirNextTime = millis() + pirDelay;
-#ifdef DEBUG
-  Serial.println(F("Motion detected"));
-#endif
-}
-
-/**
   Feedback notification when SoftAP is started
 */
-void wifiCallback (WiFiManager *wifiMgr) {
+void wifiCallback (WiFiManager * wifiMgr) {
   // TODO
   String strMsg = "Connect to ";
   strMsg += wifiMgr->getConfigPortalSSID();
@@ -1078,6 +1006,7 @@ void setup() {
   Wire.pins(SDA, SCL);
 #endif
 
+  // Beep
   pinMode(D5, OUTPUT);
   digitalWrite(D5, HIGH);
   delay(50);
@@ -1161,9 +1090,8 @@ void setup() {
   // Start the LCD timer
   lcdNextTime = millis() + lcdDelay;
 
-  // PIR pin and interrupt
+  // PIR pin
   pinMode(pinPIR, INPUT);
-  attachInterrupt(pinPIR, pirInterrupt, FALLING);
   lcdLight = true;
   // Set the timer to disable the backlight
   pirNextTime = millis() + pirDelay;
@@ -1192,8 +1120,30 @@ void loop() {
     lcdNextTime += lcdDelay;
   }
 
+  // On motion detection, turn on the backlight and
+  // display the first screen if not already on
+  if (digitalRead(pinPIR) == 0) {
+    // Check if the backlight has been turned off
+    if (not lcdLight) {
+      // Turn on the backlight
+      lcd.backlight();
+      lcdLight = true;
+      // Jump back to screen zero and set the timer
+      lcdIndex = SCR_CLK;
+      lcdNextTime += lcdDelay;
+      lcdRotateScreens();
+      // TODO MQTT motion detection
+    }
+    // Extend the timer to disable the backlight
+    pirNextTime = millis() + pirDelay;
+#ifdef DEBUG
+    Serial.println(F("Motion detected"));
+#endif
+  }
+
   // Check if motion detection has expired
   if (millis() >= pirNextTime and lcdLight) {
+    // Turn off the backlight
     lcd.noBacklight();
     lcdLight = false;
   }
