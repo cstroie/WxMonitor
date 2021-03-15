@@ -65,7 +65,7 @@ const char nodename[] = "devnode";
 const char NODENAME[] = "WxMon";
 const char nodename[] = "wxmon";
 #endif
-const char VERSION[]  = "3.6.3";
+const char VERSION[]  = "3.6.6";
 
 // OTA
 int otaProgress       = 0;
@@ -77,7 +77,7 @@ hd44780_I2Cexp      lcd;                    // auto locate and autoconfig interf
 #define             HD44780_LCDOBJECT       // tell the hd44780 sketch the lcd object has been declared
 const int           LCD_COLS      = 20;     // LCD columns
 const int           LCD_ROWS      = 4;      // LCD rows
-enum                LCD_SCREENS   {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON, SCR_ALL};
+enum                LCD_SCREENS   {SCR_CLK, SCR_WIFI, SCR_TEMP, SCR_HMDT, SCR_MPD, SCR_OTP, SCR_OHM, SCR_ODP, SCR_OPS, SCR_NOW, SCR_TOD, SCR_TON, SCR_TOM, SCR_DAT, SCR_BAR, SCR_SUN, SCR_MON, SCR_ALL};
 enum                LCD_CHARS     {LCD_LOGO, LCD_BGNUM, LCD_LGNUM, LCD_MOON, LCD_ALL};
 const unsigned long lcdDelay      = 4000UL; // Delay between changing the screen
 unsigned long       lcdNextTime   = 0UL;    // Next time to change the screen
@@ -136,8 +136,13 @@ const char lgNumChars[]             = "0123456789Cc- :.'%";
 // Wx
 const char    wxStation[]           = "ROXX0003";
 enum          WX_KEYS               {WX_NOW, WX_TOD, WX_TON, WX_TOM, WX_DAT, WX_SUN, WX_MON, WX_BAR, WX_ALL};
-char          wxRepKeys[][4]        = {"now", "tod", "ton", "tom", "dat", "sun", "mon", "bar"};
-char          wxReport[WX_ALL][2][LCD_COLS];                  // Weather storage
+char          wxRepKeys[WX_ALL][4]  = {"now", "tod", "ton", "tom", "dat", "sun", "mon", "bar"};
+char          wxReport[WX_ALL][2][LCD_COLS + 1];                // Weather storage
+
+// MPD
+enum          MPD_KEYS              {MPD_ART, MPD_ALB, MPD_TIT, MPD_STA, MPD_ALL};
+char          mpdTopics[MPD_ALL][8] = {"Artist", "Album", "Title", "state"};
+char          mpdReport[MPD_ALL][LCD_COLS + 1];
 
 // MQTT parameters
 #ifdef USE_MQTT_SSL
@@ -151,7 +156,7 @@ const char          mqttId[]       = "wxmon-dev-eridu-eu-org";  // Development M
 #else
 const char          mqttId[]       = "wxmon-eridu-eu-org";      // Production MQTT client ID
 #endif
-const char          mqttServer[]   = "eridu.eu.org";            // MQTT server address to connect to
+char                mqttServer[40] = "hornetto";                // MQTT server address to connect to
 #ifdef USE_MQTT_SSL
 const int           mqttPort       = 8883;                      // Secure MQTT port
 #else
@@ -163,13 +168,14 @@ unsigned long       mqttNextTime   = 0UL;                       // Next time to 
 const char          mqttTopicWx[]  = "wx";
 const char          mqttTopicCmd[] = "command";
 const char          mqttTopicSns[] = "sensor";
+const char          mqttTopicMPD[] = "MPD";
 const char          mqttTopicRpt[] = "report";
 
 // DHT11
 SimpleDHT11         dht;                          // The DHT11 temperature/humidity sensor
 bool                dhtOK         = false;        // The temperature/humidity sensor presence flag
 bool                dhtDrop       = true;         // Always drop the first reading
-const unsigned long snsDelay      = 60000UL;      // Delay between sensor readings
+const unsigned long snsDelay      = 30000UL;      // Delay between sensor readings
 unsigned long       snsNextTime   = 0UL;          // Next time to read the sensors
 const int           pinDHT        = D2;           // Temperature/humidity sensor input pin
 // Sensors
@@ -184,9 +190,10 @@ ADC_MODE(ADC_VCC);
 const int           pinBeep       = D5 ;          // Beep output pin
 
 // PIR
-const unsigned long pirDelay      = 300000UL;     // Delay after that the light is closed
+const unsigned long pirDelay      = 300000UL;     // Delay after that the backlight turned off
 unsigned long       pirNextTime   = 0UL;          // Next time to close the light
 const int           pinPIR        = D1;
+bool                pirEvent      = false;        // Keep the last motion event status
 
 // Character transformation
 const char chrUtfDeg[] = {194, 176, 0};
@@ -367,46 +374,6 @@ bool lcdShowTime() {
 }
 
 /**
-  LCD Display the sensor temperature with big characters
-*/
-bool lcdShowTemp() {
-  if (dhtOK) {
-    char buf[8] = "";
-    // Create the formatted line
-    snprintf_P(buf, sizeof(buf), PSTR("% 3d'c"), snsReport[SNS_ITP][0]);
-    // Define the columns
-    byte cols[] = {4, 8, 12, 16, 17};
-#if defined(DEBUG)
-    Serial.print("SCR_TEMP ");
-    Serial.println(buf);
-#endif
-    lcd.clear();
-    lcdLgPrint(buf, cols);
-  }
-  return dhtOK;
-}
-
-/**
-  LCD Display the sensor humidity with big characters
-*/
-bool lcdShowHmdt() {
-  if (dhtOK) {
-    char buf[8] = "";
-    // Create the formatted line
-    snprintf_P(buf, sizeof(buf), PSTR("% 3d%%"), snsReport[SNS_IHM][0]);
-    // Define the columns
-    byte cols[] = {4, 8, 12, 16};
-#if defined(DEBUG)
-    Serial.print("SCR_HMDT ");
-    Serial.println(buf);
-#endif
-    lcd.clear();
-    lcdLgPrint(buf, cols);
-  }
-  return dhtOK;
-}
-
-/**
   LCD Display the WiFi parameters
 
   @param serial print on serial port too
@@ -518,6 +485,32 @@ bool lcdShowWeather(int report) {
 }
 
 /**
+  LCD Display the MOD report
+*/
+bool lcdShowMPD() {
+  // Display the screen only if the status is "play"
+  if (strcmp(mpdReport[MPD_STA], "play") == 0) {
+    // Clear the screen
+    lcd.clear();
+    // Print the upper line
+    lcd.setCursor(0, 0);
+    lcd.printf("MPD % 16s", mpdReport[MPD_STA]);
+    // Artist
+    lcd.setCursor(0, 1);
+    lcd.print(mpdReport[MPD_ART]);
+    // Title
+    lcd.setCursor(0, 2);
+    lcd.print(mpdReport[MPD_TIT]);
+    // Album
+    lcd.setCursor(0, 3);
+    lcd.print(mpdReport[MPD_ALB]);
+    return true;
+  }
+  else
+    return false;
+}
+
+/**
   LCD Display the sensors
 
   @param sensor the sensor to display
@@ -526,7 +519,27 @@ bool lcdShowSensor(int sensor) {
   char text[8] = "";
 
   if (snsReport[sensor][1] > 0) {
-    if      (sensor == SNS_OTP) {
+    if      (sensor == SNS_ITP) {
+      sprintf(text, "% 3d'c", snsReport[sensor][0]);
+      byte cols[] = {4, 8, 12, 16, 17};
+#if defined(DEBUG)
+      Serial.print("SCR_ITP ");
+      Serial.println(text);
+#endif
+      lcd.clear();
+      lcdLgPrint(text, cols);
+    }
+    else if (sensor == SNS_IHM) {
+      sprintf(text, "% 4d%%", snsReport[sensor][0]);
+      byte cols[] = {0, 4, 8, 12, 16};
+#if defined(DEBUG)
+      Serial.print("SCR_IHM ");
+      Serial.println(text);
+#endif
+      lcd.clear();
+      lcdLgPrint(text, cols);
+    }
+    else if (sensor == SNS_OTP) {
       sprintf(text, "% 3d'c", snsReport[sensor][0]);
       byte cols[] = {4, 8, 12, 16, 17};
 #if defined(DEBUG)
@@ -557,7 +570,7 @@ bool lcdShowSensor(int sensor) {
       lcdLgPrint(text, cols);
     }
     else if (sensor == SNS_OPS) {
-      sprintf(text, "% 4d", snsReport[sensor][0]);
+      sprintf(text, "% 5d", snsReport[sensor][0]);
       byte cols[] = {0, 4, 8, 12, 16};
 #if defined(DEBUG)
       Serial.print("SCR_OPS ");
@@ -595,10 +608,10 @@ int lcdShowScreen(int index) {
       result = lcdShowWiFi(false);
       break;
     case SCR_TEMP:
-      result = lcdShowTemp();
+      result = lcdShowSensor(SNS_ITP);
       break;
     case SCR_HMDT:
-      result = lcdShowHmdt();
+      result = lcdShowSensor(SNS_IHM);
       break;
     case SCR_OTP:
       result = lcdShowSensor(SNS_OTP);
@@ -636,12 +649,16 @@ int lcdShowScreen(int index) {
     case SCR_MON:
       result = lcdShowWeather(WX_MON);
       break;
+    case SCR_MPD:
+      result = lcdShowMPD();
+      break;
     default:
       result = lcdShowTime();
       return -1;
   }
-  if (result == true)
+  if (result) {
     return index + 1;
+  }
   else
     return 0;
 }
@@ -668,6 +685,7 @@ void lcdRotateScreens() {
     Serial.print(F("SCR_NXT "));
     Serial.println(nextIndex);
 #endif
+    yield();
   } while (nextIndex <= 0);
 }
 
@@ -779,6 +797,8 @@ boolean mqttReconnect() {
     mqttSubscribeAll(mqttTopicCmd, nodename);   // Subscribe to command topic
     mqttSubscribeAll(mqttTopicWx,  wxStation);  // Subscribe to weather topic
     mqttSubscribeAll(mqttTopicSns, "outdoor");  // Subscribe to outdoor sensors topic
+    mqttSubscribeAll(mqttTopicMPD, "song");     // Subscribe to MPD current song topic
+    mqttSubscribeAll(mqttTopicMPD, "status");   // Subscribe to MPD state topic
 
     Serial.print(F("MQTT connected to "));
     Serial.print(mqttServer);
@@ -824,6 +844,8 @@ void mqttCallback(char *topic, byte * payload, unsigned int length) {
     wxProcess(pBranch, message);
   else if (strcmp(pRoot, "sensor") == 0 and strcmp(pTrunk, "outdoor") == 0)
     snsProcess(pBranch, message);
+  else if (strcmp(pRoot, mqttTopicMPD) == 0)
+    mpdProcess(pBranch, message);
   else if (strcmp(pRoot, "command") == 0) {
     if (strcmp(pTrunk, nodename) == 0) {
       if (strcmp(pBranch, "restart") == 0)
@@ -901,6 +923,45 @@ void wxClear(int report) {
 }
 
 /**
+  Process the MQTT MPD topics and messages
+
+  @param report the MPD topic
+  @param message the MPD message
+*/
+void mpdProcess(const char *topic, char *message) {
+  // Find the report index starting from the key
+  int idxTopic = 0;
+  while (idxTopic < MPD_ALL) {
+    yield();
+    if (strcmp(topic, mpdTopics[idxTopic]) == 0)
+      break;
+    idxTopic++;
+  }
+  // Check if the index has been found
+  if (idxTopic < MPD_ALL) {
+    // TODO Convert from UTF-8 or CP1252 to LCD charset
+    //strrpl(message, chrUtfDeg, chrLcdDeg);
+    //strrpl(message, chrWinDeg, chrLcdDeg);
+    // Store the topic
+    strncpy(mpdReport[idxTopic], message, LCD_COLS);
+    mpdReport[idxTopic][LCD_COLS + 1] = '\0';
+  }
+}
+
+/**
+  Clear a MPD report
+
+  @param report the report to be clean
+*/
+void mpdClear(int report) {
+  // Check if the index is valid
+  if (report >= 0 and report < MPD_ALL) {
+    mpdReport[report][0] = '\0';
+    mpdReport[report][0] = '\0';
+  }
+}
+
+/**
   Process the sensor topics and messages and create sensor reports
 
   @param strSensor the sensor name
@@ -969,28 +1030,47 @@ void wifiCallback (WiFiManager * wifiMgr) {
 void wifiConnect(int timeout = 300) {
   // Set the host name
   WiFi.hostname(NODENAME);
+  // Set the mode
+  WiFi.mode(WIFI_STA);
   // Try to connect to WiFi
+
+  if (!WiFi.isConnected()) {
+    Serial.print(F("WiFi connecting "));
 #ifdef WIFI_SSID
-  Serial.print(F("WiFi connecting "));
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (!WiFi.isConnected()) {
-    Serial.print(".");
-    delay(1000);
-  };
-  Serial.println(F(" done."));
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
 #else
-  WiFiManager wifiManager;
-  wifiManager.setTimeout(timeout);
-  wifiManager.setAPCallback(wifiCallback);
-  while (!wifiManager.autoConnect(NODENAME)) {
-    // TODO
-    String strMsg = "No WiFi network ";
-    Serial.println(strMsg);
-    lcd.setCursor(0, 1);
-    lcd.print(strMsg.c_str());
-    delay(1000);
-  }
+    WiFi.begin();
 #endif
+    int tries = 0;
+    while (!WiFi.isConnected() and ++tries < timeout) {
+      Serial.print(".");
+      delay(1000);
+    };
+    if (WiFi.isConnected()) {
+      Serial.println(F(" done."));
+    }
+    else {
+      // Use the WiFi manager
+      WiFiManager wifiManager;
+      wifiManager.setTimeout(timeout);
+      // Add support for mqtt server
+      WiFiManagerParameter custom_mqtt_server("server", "MQTT server", mqttServer, 40);
+      wifiManager.addParameter(&custom_mqtt_server);
+      //wifiManager.setAPCallback(wifiCallback);
+#ifndef DEBUG
+      wifiManager.setDebugOutput(false);
+#endif
+      if (!wifiManager.autoConnect(NODENAME)) {
+        Serial.println(F("No WiFi network."));
+        delay(3000);
+        // Reset and try again
+        ESP.reset();
+        delay(5000);
+      }
+      // Copy the MQTT server address
+      strncpy(mqttServer, custom_mqtt_server.getValue(), 40);
+    }
+  }
 }
 
 void setup() {
@@ -998,6 +1078,8 @@ void setup() {
   Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
   Serial.println();
   Serial.print(NODENAME);
+  Serial.print(F(" "));
+  Serial.print(VERSION);
   Serial.print(F(" "));
   Serial.println(__DATE__);
 
@@ -1007,16 +1089,16 @@ void setup() {
 #endif
 
   // Beep
-  pinMode(D5, OUTPUT);
-  digitalWrite(D5, HIGH);
+  pinMode(pinBeep, OUTPUT);
+  digitalWrite(pinBeep, HIGH);
   delay(50);
-  digitalWrite(D5, LOW);
+  digitalWrite(pinBeep, LOW);
 
   // LCD init
   lcdInit();
 
-  // Try to connect
-  wifiConnect();
+  // Try to connect to WiFi
+  while (!WiFi.isConnected()) wifiConnect();
   // Connected
   lcdShowWiFi(true);
 
@@ -1076,6 +1158,9 @@ void setup() {
   ntp.setTZ(NTP_TZ);
 
   // Start the MQTT client
+#ifdef USE_MQTT_SSL
+  wifiClient.setInsecure();
+#endif
   mqttClient.setServer(mqttServer, mqttPort);
   mqttClient.setCallback(mqttCallback);
   mqttNextTime = millis();
@@ -1122,7 +1207,7 @@ void loop() {
 
   // On motion detection, turn on the backlight and
   // display the first screen if not already on
-  if (digitalRead(pinPIR) == 0) {
+  if (digitalRead(pinPIR)) {
     // Check if the backlight has been turned off
     if (not lcdLight) {
       // Turn on the backlight
@@ -1136,11 +1221,23 @@ void loop() {
     }
     // Extend the timer to disable the backlight
     pirNextTime = millis() + pirDelay;
+    if (not pirEvent) {
+      // Motion started
+      pirEvent = true;
 #ifdef DEBUG
-    Serial.println(F("Motion detected"));
+      Serial.println(F("Motion stated"));
 #endif
+    }
   }
-
+  else {
+    // No motion, reset the event if motion has ended
+    if (pirEvent) {
+      pirEvent = false;
+#ifdef DEBUG
+      Serial.println(F("Motion ended"));
+#endif
+    }
+  }
   // Check if motion detection has expired
   if (millis() >= pirNextTime and lcdLight) {
     // Turn off the backlight
